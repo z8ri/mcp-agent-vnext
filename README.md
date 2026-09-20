@@ -25,7 +25,7 @@ ops/            Docker Compose 与部署配置
 
 ## 状态
 
-项目搭建中，详见 [VNEXT_STATUS.md](VNEXT_STATUS.md) 追踪各模块的实现进度。
+后端、前端、Trace/Eval、Docker 部署都已经写完并真实验证过（不只是代码走查——每一项具体怎么验证的，见 [VNEXT_STATUS.md](VNEXT_STATUS.md)）。还剩几件依赖真实 API Key 才能做的事（比如实测通义千问的流式行为），VNEXT_STATUS.md 的"下一步"里列清楚了。
 
 ## 环境要求
 
