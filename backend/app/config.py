@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     map_mcp_url: str = "http://localhost:8811/mcp"
     map_mcp_api_key: str = ""
 
-    jwt_secret: str = "change-me-to-a-random-string"
+    jwt_secret: str = "change-me-to-a-random-string-at-least-32-bytes-long"
     jwt_expire_minutes: int = 60 * 24
     jwt_algorithm: str = "HS256"
 

@@ -3,6 +3,7 @@ uvicorn[standard]
 pydantic>=2
 pydantic-settings
 sqlmodel
+greenlet
 aiosqlite
 langgraph
 langgraph-checkpoint-sqlite
@@ -14,7 +15,7 @@ mcp
 httpx
 tenacity
 pyjwt
-passlib[bcrypt]
+bcrypt
 python-multipart
 structlog
 pyyaml

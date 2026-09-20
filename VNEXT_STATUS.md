@@ -4,7 +4,7 @@
 
 最后更新：2026-09-20
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（15 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（30 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -19,8 +19,8 @@
 | 自定义 LangGraph 图（agent/tools/confirm/finalize 节点与条件边） | §9 偏差 1, §11 | 已实现 | `backend/app/agent/graph.py`, `nodes.py`, `state.py` | `backend/tests/test_agent_graph.py`（2 用例）pytest 跑绿，用脚本化的 `FakeMessagesListChatModel` + 真实 weather/write 子进程做端到端验证：单 tool_call 走 HITL 暂停→批准→真的写文件；多 tool_call 批次里前面无副作用的先执行、遇到有副作用的暂停、拒绝后确实没有写文件 |
 | SQLite Checkpointer（替换 InMemorySaver） | §10.1 | 已实现 | `backend/app/agent/checkpointer.py` | 同上两个测试都依赖它跨越两次 `ainvoke` 调用恢复状态（`interrupt()` 暂停后重新 resume），验证了检查点真的持久化了状态，不是纯内存 |
 | 流式修复（`astream_events` 正确处理增量片段） | §9 偏差 4 | 进行中 | `backend/app/agent/graph.py`, `graph.py` 里的 `build_default_agent_graph` | `agent_node` 用 `.ainvoke()`（而不是手动拼流式片段）调用模型，原则上比参考代码手动处理 chunk 更不容易踩 index 错误；但真正的 token 级 SSE 流式在 Stage E 做，且没有 DASHSCOPE_API_KEY，没法验证 Tongyi 真实的流式分片行为是否触发过档案提到的那个 bug——**这里不编造一个没验证过的"已复现并修复"结论**，如实标成进行中 |
-| JWT 鉴权 + 用户表 | §11 | 未开始 | `backend/app/auth/` | - |
-| SessionManager（user→conversation→thread，同 thread 并发锁） | §10.1, §11 | 未开始 | `backend/app/sessions/manager.py` | - |
+| JWT 鉴权 + 用户表 | §11 | 已实现 | `backend/app/auth/`, `backend/app/db/models.py` | `backend/tests/test_auth.py`（6 用例，含错误密码/重复邮箱/过期 token/篡改 token）+ `backend/tests/test_auth_dependencies.py`（4 用例，跑了一个真实 FastAPI+httpx ASGI 请求验证 `get_current_user` 依赖链）全部 pytest 跑绿 |
+| SessionManager（user→conversation→thread，同 thread 并发锁） | §10.1, §11 | 已实现 | `backend/app/sessions/manager.py` | `backend/tests/test_session_manager.py`（5 用例）pytest 跑绿：跨用户越权访问被拒绝、只能看到自己的 conversation 列表、同一 thread 的并发请求被 `asyncio.Lock` 严格串行化（用真实 `asyncio.gather` 竞争验证顺序，不是靠猜时序） |
 | FastAPI SSE `/chat`、分级错误事件 | §11 | 未开始 | `backend/app/api/routes_chat.py` | - |
 | `/healthz` `/readyz` | §11 | 未开始 | `backend/app/api/routes_admin.py` | - |
 | CORS 白名单 / 限流 / 日志脱敏 | §10.3 | 未开始 | `backend/app/api/`, `backend/app/security/` | - |
@@ -39,3 +39,5 @@
 
 - **MCP stdio 子进程不会继承父进程完整环境变量**：`mcp` SDK 的 `stdio_client` 在没有显式传 `env` 时，用的是一份精简的 `get_default_environment()`，不是 `os.environ` 的完整拷贝。一开始指望父进程 `os.environ["WRITE_WORKSPACE_DIR"]` 能被子进程读到，测试直接证伪了（文件写到了默认位置而不是测试期望的临时目录）。修复：`server_specs.py` 里显式给每个 stdio server 声明要转发的变量白名单（`_forward_env()`），而不是指望"反正是同一台机器"。这本身也是更安全的默认行为——本地子进程不会平白拿到一堆和它无关的密钥。
 - **aiosqlite 连接不能 await 两次**：见上面幂等键那一行，`async with await conn` 和显式 `await aiosqlite.connect()` 叠在一起会让后台线程启动两次直接报错。
+- **`passlib` 和新版 `bcrypt` 不兼容**：`passlib` 已经停止维护，装了新版 `bcrypt`（它自己去掉了 `__about__` 之类的旧属性）以后，`passlib` 内部一个版本探测的自检会跑错，进而在 `hash()` 阶段抛出一个和实际密码长度完全无关的假错误（"password cannot be longer than 72 bytes"，哪怕密码只有 10 个字符）。换成直接用 `bcrypt` 库本身（`hash_password`/`verify_password`），不经过 `passlib` 这层。
+- **`SessionManager` 的并发锁是单进程内的**：`asyncio.Lock` 只能防止同一个 Python 进程里的并发请求踩踏同一个 thread_id；多 worker/多副本部署下每个进程会有自己的一份锁，起不到跨进程互斥的作用。真要多 worker 部署，需要换成数据库行锁或 Redis 分布式锁——目前 VNEXT_STATUS 如实标注这个边界，没有假装已经解决。
