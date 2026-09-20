@@ -32,6 +32,7 @@ async def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path}/app.db")
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite3"))
     monkeypatch.setenv("IDEMPOTENCY_DB_PATH", str(tmp_path / "idempotency.sqlite3"))
+    monkeypatch.setenv("TRACE_DB_PATH", str(tmp_path / "trace.sqlite3"))
     monkeypatch.setenv("WRITE_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("MOCK_MODE", "true")
 
@@ -153,3 +154,54 @@ async def test_healthz_and_readyz(app_client):
     body = ready.json()
     assert "weather.get_weather_tips" in body["tools_available"]
     assert body["server_health"]["weather"]["status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_conversation_trace_records_agent_and_tool_spans(app_client):
+    client, _ = app_client
+
+    await client.post("/auth/register", json={"email": "trace@example.com", "password": "pw123456"})
+    login = await client.post("/auth/login", json={"email": "trace@example.com", "password": "pw123456"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    conv = await client.post("/conversations", json={"title": "trace demo"}, headers=headers)
+    conversation_id = conv.json()["id"]
+
+    await client.post(
+        "/chat", json={"conversation_id": conversation_id, "message": "今天天气怎么样"}, headers=headers
+    )
+
+    trace_resp = await client.get(f"/conversations/{conversation_id}/trace", headers=headers)
+    assert trace_resp.status_code == 200
+    spans = trace_resp.json()
+
+    span_names = [s["name"] for s in spans]
+    assert "agent.invoke" in span_names
+    assert "tool.call:weather.get_weather_tips" in span_names
+    assert all(s["status"] == "ok" for s in spans)
+    assert all(s["duration_ms"] >= 0 for s in spans)
+
+    tool_span = next(s for s in spans if s["name"] == "tool.call:weather.get_weather_tips")
+    assert tool_span["attributes"]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_trace_endpoint_rejects_other_users_conversation(app_client):
+    client, _ = app_client
+
+    await client.post("/auth/register", json={"email": "trace-owner@example.com", "password": "pw123456"})
+    owner_login = await client.post(
+        "/auth/login", json={"email": "trace-owner@example.com", "password": "pw123456"}
+    )
+    owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+    conv = await client.post("/conversations", json={"title": "private"}, headers=owner_headers)
+    conversation_id = conv.json()["id"]
+
+    await client.post("/auth/register", json={"email": "trace-intruder@example.com", "password": "pw123456"})
+    intruder_login = await client.post(
+        "/auth/login", json={"email": "trace-intruder@example.com", "password": "pw123456"}
+    )
+    intruder_headers = {"Authorization": f"Bearer {intruder_login.json()['access_token']}"}
+
+    resp = await client.get(f"/conversations/{conversation_id}/trace", headers=intruder_headers)
+    assert resp.status_code == 404

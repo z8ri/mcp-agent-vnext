@@ -24,6 +24,7 @@ from app.mcp_gateway.server_specs import default_server_specs
 from app.security.rate_limit import RateLimiter
 from app.security.redaction import configure_logging, get_logger
 from app.sessions.manager import SessionManager
+from app.trace.tracer import Tracer
 
 logger = get_logger(__name__)
 
@@ -51,9 +52,10 @@ async def lifespan(app: FastAPI):
 
     app.state.session_manager = SessionManager()
     app.state.rate_limiter = RateLimiter()
+    app.state.tracer = Tracer(db_path=settings.trace_db_path)
 
     async with sqlite_checkpointer(settings.checkpoint_db_path) as checkpointer:
-        app.state.graph = build_default_agent_graph(gateway, checkpointer)
+        app.state.graph = build_default_agent_graph(gateway, checkpointer, tracer=app.state.tracer)
         logger.info(
             "startup_complete",
             mock_mode=settings.mock_mode,

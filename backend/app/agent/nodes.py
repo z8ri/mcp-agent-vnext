@@ -5,20 +5,40 @@
 - `tools_node`：LangGraph 循环控制的一部分，逐个把 tool_call 交给网关；
   网关（MCP Client 协议层）决定要不要真的转发给 MCP Server 执行。
 - `confirm_node`：HITL 门控，真正暂停图的执行等人确认，不是网关内部状态。
-- `finalize_node`：收尾，给 Stage F 的 Trace 关闭点留一个挂载位置。
+- `finalize_node`：收尾。
+
+Trace（Stage F）只包在真正执行一次的工作上——`model.ainvoke()`、
+`gateway.call()`——不包 `interrupt()` 本身：`interrupt()` 暂停时会向上抛
+`GraphInterrupt`，而且恢复执行时整个节点函数会从头重新跑一遍；把这段也包进
+span 会导致"暂停"被错误记成一次 error，恢复时又会多记一条重复 span。
 """
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
+from langchain_core.runnables.config import RunnableConfig
 from langgraph.types import interrupt
 
 from app.mcp_gateway.client import GatewayClient
 from app.mcp_gateway.contracts import ErrorCode
 from app.agent.state import AgentState, PendingToolCall
+from app.trace.tracer import Tracer
+
+
+def _thread_id(config: RunnableConfig) -> str:
+    return config["configurable"]["thread_id"]
+
+
+def _record_result(attrs: dict[str, Any], result) -> None:
+    # 只记 ok/error code，不把工具的 args/content 写进 trace——那可能是用户输入的原文。
+    attrs["ok"] = result.ok
+    attrs["idempotent_replay"] = result.idempotent_replay
+    if result.error is not None:
+        attrs["error_code"] = result.error.code.value
 
 SYSTEM_PROMPT = (
     "你是一个可以调用工具的助手。工具名里的前缀（比如 write. 或 weather.）表示"
@@ -28,10 +48,16 @@ SYSTEM_PROMPT = (
 )
 
 
-def make_agent_node(model_with_tools: Runnable):
-    async def agent_node(state: AgentState) -> dict:
+def make_agent_node(model_with_tools: Runnable, tracer: Tracer | None = None):
+    async def agent_node(state: AgentState, config: RunnableConfig) -> dict:
         messages = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
-        response = await model_with_tools.ainvoke(messages)
+
+        if tracer is None:
+            response = await model_with_tools.ainvoke(messages)
+        else:
+            async with tracer.span(_thread_id(config), "agent.invoke", message_count=len(messages)):
+                response = await model_with_tools.ainvoke(messages)
+
         assert isinstance(response, AIMessage)
 
         queue: list[PendingToolCall] = [
@@ -46,12 +72,17 @@ def route_after_agent(state: AgentState) -> str:
     return "tools" if state["tool_call_queue"] else "finalize"
 
 
-def make_tools_node(gateway: GatewayClient):
-    async def tools_node(state: AgentState) -> dict:
+def make_tools_node(gateway: GatewayClient, tracer: Tracer | None = None):
+    async def tools_node(state: AgentState, config: RunnableConfig) -> dict:
         queue = list(state["tool_call_queue"])
         call = queue.pop(0)
 
-        result = await gateway.call(call["name"], call["args"], confirmed=False, idempotency_key=call["id"])
+        if tracer is None:
+            result = await gateway.call(call["name"], call["args"], confirmed=False, idempotency_key=call["id"])
+        else:
+            async with tracer.span(_thread_id(config), f"tool.call:{call['name']}", confirmed=False) as attrs:
+                result = await gateway.call(call["name"], call["args"], confirmed=False, idempotency_key=call["id"])
+                _record_result(attrs, result)
 
         if not result.ok and result.error is not None and result.error.code == ErrorCode.CONFIRMATION_REQUIRED:
             return {"tool_call_queue": queue, "awaiting_confirmation": call}
@@ -72,8 +103,8 @@ def route_after_tools(state: AgentState) -> str:
     return "tools" if state["tool_call_queue"] else "agent"
 
 
-def make_confirm_node(gateway: GatewayClient):
-    async def confirm_node(state: AgentState) -> dict:
+def make_confirm_node(gateway: GatewayClient, tracer: Tracer | None = None):
+    async def confirm_node(state: AgentState, config: RunnableConfig) -> dict:
         pending = state["awaiting_confirmation"]
         assert pending is not None
 
@@ -105,7 +136,17 @@ def make_confirm_node(gateway: GatewayClient):
             )
             return {"messages": [rejection], "awaiting_confirmation": None}
 
-        result = await gateway.call(pending["name"], pending["args"], confirmed=True, idempotency_key=pending["id"])
+        if tracer is None:
+            result = await gateway.call(
+                pending["name"], pending["args"], confirmed=True, idempotency_key=pending["id"]
+            )
+        else:
+            async with tracer.span(_thread_id(config), f"tool.call:{pending['name']}", confirmed=True) as attrs:
+                result = await gateway.call(
+                    pending["name"], pending["args"], confirmed=True, idempotency_key=pending["id"]
+                )
+                _record_result(attrs, result)
+
         tool_message = ToolMessage(
             content=json.dumps(result.to_dict(), ensure_ascii=False),
             tool_call_id=pending["id"],

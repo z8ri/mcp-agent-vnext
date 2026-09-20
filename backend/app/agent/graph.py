@@ -30,14 +30,21 @@ from app.agent.nodes import (
 )
 from app.agent.state import AgentState
 from app.mcp_gateway.client import GatewayClient
+from app.trace.tracer import Tracer
 
 
-def build_graph(model_with_tools: Runnable, gateway: GatewayClient, checkpointer: BaseCheckpointSaver):
+def build_graph(
+    model_with_tools: Runnable,
+    gateway: GatewayClient,
+    checkpointer: BaseCheckpointSaver,
+    *,
+    tracer: Tracer | None = None,
+):
     builder = StateGraph(AgentState)
 
-    builder.add_node("agent", make_agent_node(model_with_tools))
-    builder.add_node("tools", make_tools_node(gateway))
-    builder.add_node("confirm", make_confirm_node(gateway))
+    builder.add_node("agent", make_agent_node(model_with_tools, tracer))
+    builder.add_node("tools", make_tools_node(gateway, tracer))
+    builder.add_node("confirm", make_confirm_node(gateway, tracer))
     builder.add_node("finalize", finalize_node)
 
     builder.add_edge(START, "agent")
@@ -49,7 +56,13 @@ def build_graph(model_with_tools: Runnable, gateway: GatewayClient, checkpointer
     return builder.compile(checkpointer=checkpointer)
 
 
-def build_default_agent_graph(gateway: GatewayClient, checkpointer: BaseCheckpointSaver, *, model: Runnable | None = None):
+def build_default_agent_graph(
+    gateway: GatewayClient,
+    checkpointer: BaseCheckpointSaver,
+    *,
+    model: Runnable | None = None,
+    tracer: Tracer | None = None,
+):
     """真实运行时用的入口。
 
     `MOCK_MODE=true`（没有 DASHSCOPE_API_KEY 时的默认值）用 `MockAgentModel`，
@@ -64,11 +77,11 @@ def build_default_agent_graph(gateway: GatewayClient, checkpointer: BaseCheckpoi
             from app.agent.mock_model import MockAgentModel
 
             model = MockAgentModel()
-            return build_graph(model, gateway, checkpointer)
+            return build_graph(model, gateway, checkpointer, tracer=tracer)
 
         from langchain_community.chat_models import ChatTongyi
 
         model = ChatTongyi(model=settings.qwen_model, dashscope_api_key=settings.dashscope_api_key, streaming=True)
 
     model_with_tools = model.bind_tools(gateway.registry.bindable_tools())
-    return build_graph(model_with_tools, gateway, checkpointer)
+    return build_graph(model_with_tools, gateway, checkpointer, tracer=tracer)

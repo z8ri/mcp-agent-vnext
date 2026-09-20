@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
     checkpoint_db_path: str = "./data/checkpoints.sqlite3"
     idempotency_db_path: str = "./data/idempotency.sqlite3"
+    trace_db_path: str = "./data/trace.sqlite3"
 
     cors_allowed_origins: str = "http://localhost:5173"
 

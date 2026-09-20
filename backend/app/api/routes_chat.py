@@ -49,6 +49,10 @@ def _graph(request: Request):
     return request.app.state.graph
 
 
+def _tracer(request: Request):
+    return request.app.state.tracer
+
+
 @router.post("/conversations", response_model=ConversationResponse)
 async def create_conversation(
     body: ConversationCreateRequest,
@@ -122,3 +126,19 @@ async def chat(
                 yield event
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/conversations/{conversation_id}/trace")
+async def get_conversation_trace(
+    conversation_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    manager = _session_manager(request)
+    try:
+        conversation = await manager.get_owned_conversation(session, user, conversation_id)
+    except (ConversationNotFoundError, ConversationOwnershipError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在") from None
+
+    return await _tracer(request).spans_for_thread(conversation.thread_id)

@@ -11,7 +11,8 @@
 - SSE 按图的执行步骤增量推送（工具调用、确认请求、工具结果、最终消息），不是等全部跑完才一次性返回一个 JSON；逐 token 的模型级流式还没有用真实 Key 验证过，见 `VNEXT_STATUS.md`
 - `MOCK_MODE=true` 时用关键词触发的假模型驱动真实的 MCP Gateway/Server，不需要任何 API Key 就能把整条链路（注册登录 → 建会话 → 聊天 → 工具调用 → HITL 确认 → 写文件）跑通
 - 自建免 Key 地图 MCP Server（基于 OpenStreetMap Nominatim），替换参考代码中的占位符地图配置
-- 结构化 Trace / Eval 回归测试（规划中，见 `VNEXT_STATUS.md`）
+- 结构化 Trace：每次模型调用、每次工具调用都落一条 span（耗时、成功/失败），`GET /conversations/{id}/trace` 能按时间顺序查一次对话的完整轨迹
+- Eval 回归套件（`backend/eval/`）：5 个脚本化场景（天气成功、写文件确认执行、写文件拒绝不执行、无关消息不触发工具、单 server 故障不影响其它工具），`MOCK_MODE` 下不需要任何 Key 就能跑，`python -m eval.runner` 单独跑出报告，也接进了 `pytest`
 
 ## 目录结构
 
@@ -77,5 +78,18 @@ curl -N -X POST localhost:8000/chat \
 ```
 
 `MOCK_MODE=false` 并填好 `DASHSCOPE_API_KEY` 之后，同一套 API 会换成真实调用通义千问；天气/地图工具本身默认不需要额外 Key（地图走自建的 Nominatim Server，天气没配 `OPENWEATHER_API_KEY` 时会返回结构化的"未配置"错误而不是崩溃）。
+
+### 查一次对话的 Trace
+
+```bash
+curl -s localhost:8000/conversations/$CONV_ID/trace -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+### 跑 Eval 回归套件
+
+```bash
+cd backend
+python -m eval.runner
+```
 
 前端和 Docker 部署会在后续阶段补上对应的运行说明。

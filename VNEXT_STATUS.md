@@ -4,7 +4,7 @@
 
 最后更新：2026-09-20
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（35 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -24,8 +24,8 @@
 | FastAPI SSE `/chat`、分级错误事件 | §11 | 已实现 | `backend/app/api/routes_chat.py`, `sse.py` | `backend/tests/test_app_integration.py`（5 用例）pytest 跑绿 + 真实 `uvicorn` 起服务用 `curl` 手工过了一遍完整链路：注册→登录→建会话→"帮我写一个笔记"→SSE 收到 `tool_call`/`confirm_required`/`final`→提交 `confirm:true`→SSE 收到 `tool_result`/`message`，`backend/output/` 下真的多了一个内容正确的 `.txt` 文件 |
 | `/healthz` `/readyz` | §11 | 已实现 | `backend/app/api/routes_admin.py` | 同上，真实 curl 验证过两个端点，`/readyz` 能看到 per-server 健康状态和熔断器状态 |
 | CORS 白名单 / 限流 / 日志脱敏 | §10.3 | 进行中 | `backend/app/security/rate_limit.py`, `redaction.py`, `main.py` 里的 CORSMiddleware | CORS 配置代码完成，走集成测试间接覆盖（没有专门测跨域请求本身）；限流已经作为真实依赖挂在 `/chat` 上，但**没有写"连续请求触发 429"的测试**，`TokenBucket` 本身的算法逻辑也没有单独单测，只是代码走查；日志脱敏单独用脚本验证过 `dashscope_api_key` 这类字段会被替换成 `***redacted***`，但还没接到 `main.py` 实际的请求日志里 |
-| Trace（结构化 span） | §11 | 未开始 | `backend/app/trace/tracer.py` | - |
-| Eval 回归场景（mock 模式可跑） | §12 | 部分实现 | `backend/tests/test_app_integration.py` | 目前的"mock 模式可跑通"验证是靠 `MockAgentModel` + 真实集成测试完成的，不是档案设想的独立 `eval_cases/` 场景化框架；算是提前满足了这一条的精神，但还没有专门整理成 Stage F 计划里那种可复用的 EvalCase 列表 |
+| Trace（结构化 span） | §11 | 已实现 | `backend/app/trace/tracer.py`, `GET /conversations/{id}/trace` | `backend/tests/test_app_integration.py` 里两个新用例 pytest 跑绿：真实走一轮天气对话后，trace 里能查到 `agent.invoke`/`tool.call:weather.get_weather_tips` 两个 span，状态和耗时都对；跨用户访问别人会话的 trace 会被拒绝（404）。范围边界：span 只到"网关发起工具调用"这一层，MCP transport 内部（比如 stdio 子进程里具体卡在哪一步）没有单独的 span；也没有做跨进程的分布式 trace context 传播——这些在 tracer.py 的注释里写清楚了，不算已实现 |
+| Eval 回归场景（mock 模式可跑） | §12 | 已实现 | `backend/eval/cases.py`, `runner.py`，`backend/tests/test_eval_cases.py` | 5 个脚本化场景（天气成功、写文件确认后执行、写文件拒绝后不执行、无关消息不触发工具、单 server 故障不影响其它工具）全部通过 `MockAgentModel` + 真实 MCP 子进程跑通，每个用例独立临时目录、互不干扰；接进了 pytest（`test_eval_cases.py`，5 用例跑绿），也能用 `python -m eval.runner` 单独跑出一份文本报告。额外做了一次"harness 自检"：故意写一个错误断言，确认 runner 真的会报 FAIL 而不是摆设 |
 | Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 未开始 | `frontend/src/` | - |
 | Playwright E2E | §12.9 | 未开始 | `frontend/e2e/` | - |
 | Docker Compose 本地部署 | §11 | 未开始 | `ops/docker-compose.yml` | - |
