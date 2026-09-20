@@ -95,6 +95,17 @@ class ServerRegistry:
     def list_available(self) -> list[str]:
         return sorted(self.tools.keys())
 
+    def bindable_tools(self) -> list:
+        """给模型 `bind_tools()` 用的工具列表：把每个工具重命名成 qualified_name。
+
+        模型看到的、tool_calls 里返回的都是 `server.tool` 这个去冲突后的名字，
+        Agent 图直接拿它去查网关，不需要再做一次名字映射。
+        """
+        return [
+            registered.langchain_tool.model_copy(update={"name": registered.qualified_name})
+            for registered in self.tools.values()
+        ]
+
     async def close(self) -> None:
         cleanup = getattr(self.client, "cleanup", None) or getattr(self.client, "close", None)
         if cleanup is not None:

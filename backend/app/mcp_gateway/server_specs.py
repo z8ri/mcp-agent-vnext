@@ -7,6 +7,7 @@ Registry 用它来发现+校验工具，GatewayClient 用它来决定重试/熔�
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,14 @@ from pathlib import Path
 from app.config import get_settings
 
 MCP_SERVERS_DIR = Path(__file__).resolve().parents[3] / "mcp_servers"
+
+
+def _forward_env(*names: str) -> dict[str, str]:
+    """MCP stdio transport 默认只给子进程一份精简环境（`get_default_environment()`），
+    不会整包转发父进程的 `os.environ`——这是好事（不会把无关密钥泄露给本地子进程），
+    但意味着子进程需要的变量必须显式在这里列出来转发，不能指望"反正是同一台机器"。
+    """
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 @dataclass
@@ -47,6 +56,9 @@ def default_server_specs() -> list[ServerSpec]:
             "command": python,
             "args": [str(MCP_SERVERS_DIR / "weather_server.py")],
             "transport": "stdio",
+            # weather_server.py 自己也会 load_dotenv()，这里转发是为了不依赖
+            # 子进程 cwd 下恰好有一份 .env 文件（比如测试里用临时目录起子进程的情况）。
+            "env": _forward_env("OPENWEATHER_API_KEY"),
         },
         allowlist={"query_weather", "get_weather_tips"},
         tool_policies={
@@ -61,6 +73,7 @@ def default_server_specs() -> list[ServerSpec]:
             "command": python,
             "args": [str(MCP_SERVERS_DIR / "write_server.py")],
             "transport": "stdio",
+            "env": _forward_env("WRITE_WORKSPACE_DIR"),
         },
         allowlist={"write_file"},
         tool_policies={
