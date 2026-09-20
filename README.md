@@ -105,4 +105,15 @@ npm run dev
 
 浏览器打开 `http://localhost:5173`，注册一个账号，新建对话，跟它说"今天天气怎么样"或者"帮我写一个笔记"就能看到工具调用、HITL 确认卡、分级错误+重试这些效果。详见 [frontend/README.md](frontend/README.md)；端到端测试见 [frontend/e2e/README.md](frontend/e2e/README.md)。
 
-Docker 部署会在 Stage H 补上对应的运行说明。
+## Docker 部署
+
+一键起全栈（`map-mcp` + `backend` + `frontend`，`backend` 内部再拉起 `weather`/`write` 两个 stdio 子进程）：
+
+```bash
+cp .env.example .env   # MOCK_MODE=true 不需要填任何 Key
+docker compose -f ops/docker-compose.yml up --build
+```
+
+起来之后：前端 `http://localhost:5173`，后端 `http://localhost:8000`，地图 MCP Server（Streamable HTTP）`http://localhost:8811/mcp`。`backend` 会等 `map-mcp` 健康检查通过、`frontend` 会等 `backend` 健康检查通过才启动，验证的是档案里"单 Server 故障不拖垮整体"这条能不能在容器编排层面也成立。
+
+`backend-data`/`backend-output` 是具名 volume，装的是 SQLite 数据库文件和 `write_file` 落盘的内容，`docker compose down` 不会删，`docker compose down -v` 才会。

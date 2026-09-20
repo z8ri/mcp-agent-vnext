@@ -1,0 +1,65 @@
+# 用法（在仓库根目录）：
+#   cp .env.example .env   # 按需填 DASHSCOPE_API_KEY 等，MOCK_MODE=true 不需要
+#   docker compose -f ops/docker-compose.yml up --build
+#
+# 三个服务：map-mcp（Streamable HTTP，独立容器）、backend（FastAPI + weather/write
+# 作为它的 stdio 子进程，不是独立容器）、frontend（nginx 提供静态构建产物）。
+
+services:
+  map-mcp:
+    build:
+      context: ..
+      dockerfile: mcp_servers/Dockerfile
+    ports:
+      - "8811:8811"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8811/mcp', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      MAP_MCP_URL: "http://map-mcp:8811/mcp"
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/app.db"
+      CHECKPOINT_DB_PATH: "/app/data/checkpoints.sqlite3"
+      IDEMPOTENCY_DB_PATH: "/app/data/idempotency.sqlite3"
+      TRACE_DB_PATH: "/app/data/trace.sqlite3"
+      WRITE_WORKSPACE_DIR: "/app/output"
+      CORS_ALLOWED_ORIGINS: "http://localhost:5173"
+    volumes:
+      - backend-data:/app/data
+      - backend-output:/app/output
+    depends_on:
+      map-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: "http://localhost:8000"
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  backend-data:
+  backend-output:

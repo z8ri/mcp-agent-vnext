@@ -28,7 +28,7 @@
 | Eval 回归场景（mock 模式可跑） | §12 | 已实现 | `backend/eval/cases.py`, `runner.py`，`backend/tests/test_eval_cases.py` | 5 个脚本化场景（天气成功、写文件确认后执行、写文件拒绝后不执行、无关消息不触发工具、单 server 故障不影响其它工具）全部通过 `MockAgentModel` + 真实 MCP 子进程跑通，每个用例独立临时目录、互不干扰；接进了 pytest（`test_eval_cases.py`，5 用例跑绿），也能用 `python -m eval.runner` 单独跑出一份文本报告。额外做了一次"harness 自检"：故意写一个错误断言，确认 runner 真的会报 FAIL 而不是摆设 |
 | Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 已实现 | `frontend/src/` | 用内置浏览器手工走了一遍完整流程：注册→建会话→问天气（看到 tool_call/tool_result、不需要确认）→要求写笔记（看到确认卡→批准→看到执行成功，磁盘上真的多了文件）→再写一次→拒绝（看到"用户拒绝执行该操作"，磁盘上没有多文件）→同一会话里多轮历史正确保留。`thread_id` 全程前端拿不到，只有 `conversation_id`。类型检查（`vue-tsc -b`）和生产构建（`vite build`）都过 |
 | Playwright E2E | §12.9 | 已实现 | `frontend/e2e/chat.spec.ts` | 4 个用例真实跑通（装了 Chromium）：天气问答不触发确认、写文件确认后真执行、拒绝后不执行、密码错误显示不可重试的错误提示。Playwright 只管前端 dev server，后端需要单独起好（`frontend/e2e/README.md` 里写了原因和步骤）——没有为了"一键跑"把机器专属的 conda 路径硬编码进配置文件 |
-| Docker Compose 本地部署 | §11 | 未开始 | `ops/docker-compose.yml` | - |
+| Docker Compose 本地部署 | §11 | 进行中 | `ops/docker-compose.yml`, `backend/Dockerfile`, `mcp_servers/Dockerfile`, `frontend/Dockerfile` | 代码写完了：三个服务（`map-mcp`/`backend`/`frontend`），`depends_on` + healthcheck 串起启动顺序，具名 volume 存数据库和 write 输出。这台机器一开始没装 Docker，`brew install --cask docker` 卡在一步需要终端交互输入密码的 `sudo`，用户正在自己装；**还没有真的跑过 `docker compose up`**，如实标"进行中"，装好之后就去验证 |
 
 ## 说明
 
