@@ -13,7 +13,11 @@ services:
     ports:
       - "8811:8811"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8811/mcp', timeout=3)"]
+      # Streamable HTTP 的 /mcp 端点对 Accept header 有要求，裸 GET 会被协议层
+      # 正确地拒绝并返回 406——这正好证明进程活着、在说 HTTP，健康检查只需要
+      # 这一点，不需要真的完成一次 MCP 握手；urlopen 遇到 4xx/5xx 会抛
+      # HTTPError，所以显式接住它当成"活着"。
+      test: ["CMD", "python", "-c", "import urllib.error, urllib.request\ntry:\n    urllib.request.urlopen('http://localhost:8811/mcp', timeout=3)\nexcept urllib.error.HTTPError:\n    pass"]
       interval: 10s
       timeout: 5s
       retries: 5

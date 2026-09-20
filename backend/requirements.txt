@@ -12,7 +12,7 @@ langchain-core
 langchain-community
 dashscope
 langchain-mcp-adapters
-mcp
+mcp<2
 httpx
 tenacity
 pyjwt

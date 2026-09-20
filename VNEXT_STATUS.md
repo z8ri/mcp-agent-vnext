@@ -4,7 +4,7 @@
 
 最后更新：2026-09-20
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -15,7 +15,7 @@
 | 幂等键（写类工具去重） | §11, §12.8 | 已实现 | `backend/app/mcp_gateway/idempotency.py` | `backend/tests/test_idempotency.py`（3 用例）pytest 跑绿；过程中发现并修复了一个真 bug（aiosqlite 连接被 await 两次导致 "threads can only be started once"）；另外用真实 GatewayClient 调用 `write.write_file` 两次同一个 idempotency_key，确认第二次是 `idempotent_replay: true`、没有真的重写文件 |
 | Weather Server 重写（重试/缓存/结构化错误） | §7, §10.4 | 进行中 | `mcp_servers/weather_server.py` | 真实子进程启动、`get_weather_tips` 端到端调通；`query_weather` 因为没有 OPENWEATHER_API_KEY，只验证了"未配置 key 时返回结构化 provider 错误"这条路径，重试/缓存逻辑本身未触发验证 |
 | Write Server 重写（路径沙箱、并发防覆盖、幂等） | §7, §12.8 | 已实现 | `mcp_servers/write_server.py` | `mcp_servers/tests/test_write_server.py`（6 用例）pytest 跑绿；额外用真实 GatewayClient 端到端验证了"未确认拒绝写入→确认后写入→重复调用走幂等回放" |
-| 地图 MCP Server（免 Key，替换占位符） | §7, §12.3 | 未开始 | `mcp_servers/map_server.py` | 代码完成，但还没真的用 `streamable-http` transport 起过这个 Server 或连过 Nominatim，`mcp.run(transport="streamable-http")` 的参数仍未验证 |
+| 地图 MCP Server（免 Key，替换占位符） | §7, §12.3 | 已实现 | `mcp_servers/map_server.py` | Docker 里真实用 `streamable-http` transport 起来了，`/readyz` 显示 `map` 健康、`map.geocode`/`map.reverse_geocode` 可用；直接调用 `geocode({"query": "Eiffel Tower"})` 拿到真实 Nominatim 结果（`48.8582599, 2.2945006`）——这是本项目第一次真正验证这个 Server，之前一直因为没跑过而标"未开始" |
 | 自定义 LangGraph 图（agent/tools/confirm/finalize 节点与条件边） | §9 偏差 1, §11 | 已实现 | `backend/app/agent/graph.py`, `nodes.py`, `state.py` | `backend/tests/test_agent_graph.py`（2 用例）pytest 跑绿，用脚本化的 `FakeMessagesListChatModel` + 真实 weather/write 子进程做端到端验证：单 tool_call 走 HITL 暂停→批准→真的写文件；多 tool_call 批次里前面无副作用的先执行、遇到有副作用的暂停、拒绝后确实没有写文件 |
 | SQLite Checkpointer（替换 InMemorySaver） | §10.1 | 已实现 | `backend/app/agent/checkpointer.py` | 同上两个测试都依赖它跨越两次 `ainvoke` 调用恢复状态（`interrupt()` 暂停后重新 resume），验证了检查点真的持久化了状态，不是纯内存 |
 | 流式修复（`astream_events` 正确处理增量片段） | §9 偏差 4 | 进行中 | `backend/app/agent/graph.py`, `graph.py` 里的 `build_default_agent_graph` | `agent_node` 用 `.ainvoke()`（而不是手动拼流式片段）调用模型，原则上比参考代码手动处理 chunk 更不容易踩 index 错误；但真正的 token 级 SSE 流式在 Stage E 做，且没有 DASHSCOPE_API_KEY，没法验证 Tongyi 真实的流式分片行为是否触发过档案提到的那个 bug——**这里不编造一个没验证过的"已复现并修复"结论**，如实标成进行中 |
@@ -28,7 +28,7 @@
 | Eval 回归场景（mock 模式可跑） | §12 | 已实现 | `backend/eval/cases.py`, `runner.py`，`backend/tests/test_eval_cases.py` | 5 个脚本化场景（天气成功、写文件确认后执行、写文件拒绝后不执行、无关消息不触发工具、单 server 故障不影响其它工具）全部通过 `MockAgentModel` + 真实 MCP 子进程跑通，每个用例独立临时目录、互不干扰；接进了 pytest（`test_eval_cases.py`，5 用例跑绿），也能用 `python -m eval.runner` 单独跑出一份文本报告。额外做了一次"harness 自检"：故意写一个错误断言，确认 runner 真的会报 FAIL 而不是摆设 |
 | Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 已实现 | `frontend/src/` | 用内置浏览器手工走了一遍完整流程：注册→建会话→问天气（看到 tool_call/tool_result、不需要确认）→要求写笔记（看到确认卡→批准→看到执行成功，磁盘上真的多了文件）→再写一次→拒绝（看到"用户拒绝执行该操作"，磁盘上没有多文件）→同一会话里多轮历史正确保留。`thread_id` 全程前端拿不到，只有 `conversation_id`。类型检查（`vue-tsc -b`）和生产构建（`vite build`）都过 |
 | Playwright E2E | §12.9 | 已实现 | `frontend/e2e/chat.spec.ts` | 4 个用例真实跑通（装了 Chromium）：天气问答不触发确认、写文件确认后真执行、拒绝后不执行、密码错误显示不可重试的错误提示。Playwright 只管前端 dev server，后端需要单独起好（`frontend/e2e/README.md` 里写了原因和步骤）——没有为了"一键跑"把机器专属的 conda 路径硬编码进配置文件 |
-| Docker Compose 本地部署 | §11 | 进行中 | `ops/docker-compose.yml`, `backend/Dockerfile`, `mcp_servers/Dockerfile`, `frontend/Dockerfile` | 代码写完了：三个服务（`map-mcp`/`backend`/`frontend`），`depends_on` + healthcheck 串起启动顺序，具名 volume 存数据库和 write 输出。这台机器一开始没装 Docker，`brew install --cask docker` 卡在一步需要终端交互输入密码的 `sudo`，用户正在自己装；**还没有真的跑过 `docker compose up`**，如实标"进行中"，装好之后就去验证 |
+| Docker Compose 本地部署 | §11 | 已实现 | `ops/docker-compose.yml`, `backend/Dockerfile`, `mcp_servers/Dockerfile`, `frontend/Dockerfile` | `docker compose up -d --build` 真实跑通，三个容器按 `depends_on`+healthcheck 顺序起来（`map-mcp` healthy → `backend` healthy → `frontend`）；容器化的后端跑通了注册→登录→建会话→聊天→工具调用全流程，浏览器打开 `localhost:5173` 真实连上了容器化后端并拿到之前 curl 建的会话。这台机器一开始没装 Docker、装完后引擎起不来，排查过程和修复见下面"真问题"部分 |
 
 ## 说明
 
@@ -44,3 +44,6 @@
 - **`SessionManager` 的并发锁是单进程内的**：`asyncio.Lock` 只能防止同一个 Python 进程里的并发请求踩踏同一个 thread_id；多 worker/多副本部署下每个进程会有自己的一份锁，起不到跨进程互斥的作用。真要多 worker 部署，需要换成数据库行锁或 Redis 分布式锁——目前 VNEXT_STATUS 如实标注这个边界，没有假装已经解决。
 - **SQLite 不会自动建父目录**：`DATABASE_URL=sqlite+aiosqlite:///./data/app.db` 指向的 `data/` 目录如果不存在，`sqlite3.connect()` 直接报 "unable to open database file"，错误信息完全看不出是目录问题。pytest 里一直没暴露，因为测试用的要么是 `:memory:`，要么是 `tmp_path`（pytest 自己会建好这个目录）；直到真的用 `uvicorn` 起服务器才踩到。修复：`db/engine.py` 的 `make_engine()` 现在会自己解析 URL、提前 `mkdir(parents=True, exist_ok=True)`。这也是为什么"pytest 全绿"不能替代"真的跑一次服务器"——集成测试用的临时目录会悄悄掩盖这类问题。
 - **必须真起一次服务器才能验证的东西，pytest 集成测试测不出来**：上面这条 bug 就是例子。这一轮之后确认过一次：`uvicorn app.main:app` 真实起进程、真实用 `curl` 走完注册→登录→建会话→聊天→HITL 确认→读到真实写入的文件这一整条链路，才敢把"FastAPI SSE /chat"这一行标成"已实现"。
+- **这台机器一开始没装 Docker，装上之后引擎也起不来**：`brew install --cask docker` 第一次卡在一步需要终端交互输入密码的 `sudo`，用户自己在终端跑完；装完之后 Docker Desktop 的虚拟化引擎又卡在"Starting the Docker Engine..."一直连不上，日志里翻出根因是 `VZErrorDomain Code=1: Failed to install Rosetta`——Docker 自己内置的 Rosetta 安装器在这台机器上跑失败了。绕过的办法：直接用系统自带的 `softwareupdate --install-rosetta --agree-to-license` 把 Rosetta 装好（不走 Docker 那条坏掉的路径），再 `pkill` 掉卡死在空转的 `com.docker.backend` 残留进程、重新打开 Docker Desktop，虚拟机才正常拉起来。这个项目其实完全不需要 Rosetta——三个镜像（`python:3.11-slim`/`node:20-slim`/`nginx:alpine`）都原生支持 arm64，Rosetta 只在需要跑 x86_64 镜像时才用得上。
+- **`mcp` 包 2.x 是破坏性变更，两个 Dockerfile 装出了不一样的大版本**：`backend/Dockerfile` 因为同时装了 `langchain-mcp-adapters`，被它间接约束在 `mcp==1.30.0`；但 `mcp_servers/Dockerfile`（map-mcp 的独立镜像）只写了裸的 `pip install mcp`，构建时刚好撞上 PyPI 上更新的 `mcp==2.2.0`，而 2.x 把 `FastMCP` 改名成了 `MCPServer`，`map_server.py` 一启动就 `ModuleNotFoundError`。修复：两边都显式锁 `mcp<2`。这类"没有 lockfile、两个镜像各自解析出不同版本"的问题，只有真的在干净的容器里从头构建才会暴露——本机 conda 环境里那份 `mcp` 是几周前装的，一直没感知到 PyPI 上已经出了新的大版本。
+- **Streamable HTTP 的健康检查不能用"能不能拿到 2xx"来判断**：`map-mcp` 的 healthcheck 一开始是裸 `urllib.request.urlopen('http://localhost:8811/mcp')`，容器日志显示服务其实已经正常起来了，但健康检查一直失败——原因是 MCP 的 Streamable HTTP 端点对请求的 `Accept` header 有强制要求，不带正确 header 的裸 GET 会被协议层正确地返回 406，而 `urlopen` 对任何非 2xx 状态码都会抛 `HTTPError`。修复：健康检查显式 `except urllib.error.HTTPError: pass`——收到 HTTP 响应（哪怕是 406）就足够证明进程活着、在正常处理请求，不需要真的走完一次 MCP 握手。
