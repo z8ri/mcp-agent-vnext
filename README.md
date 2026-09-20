@@ -30,7 +30,7 @@ ops/            Docker Compose 与部署配置
 ## 环境要求
 
 - **Python 3.11+**（`mcp`、`langgraph-checkpoint-sqlite` 等依赖要求 3.10+）。本机系统自带的是 Python 3.9，开发时用 conda 单独建了一个 3.11 环境，见下面的快速开始。
-- Node.js 18+（前端，Stage G 会补充版本锁定）。
+- **Node.js 18+**（开发用的是 Homebrew 装的 `node@26`）。
 
 ## 快速开始
 
@@ -92,4 +92,17 @@ cd backend
 python -m eval.runner
 ```
 
-前端和 Docker 部署会在后续阶段补上对应的运行说明。
+## 前端
+
+后端起好之后（见上面），另开一个终端：
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_BASE_URL 指向后端，默认 http://localhost:8000
+npm run dev
+```
+
+浏览器打开 `http://localhost:5173`，注册一个账号，新建对话，跟它说"今天天气怎么样"或者"帮我写一个笔记"就能看到工具调用、HITL 确认卡、分级错误+重试这些效果。详见 [frontend/README.md](frontend/README.md)；端到端测试见 [frontend/e2e/README.md](frontend/e2e/README.md)。
+
+Docker 部署会在 Stage H 补上对应的运行说明。

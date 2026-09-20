@@ -4,7 +4,7 @@
 
 最后更新：2026-09-20
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -26,14 +26,15 @@
 | CORS 白名单 / 限流 / 日志脱敏 | §10.3 | 进行中 | `backend/app/security/rate_limit.py`, `redaction.py`, `main.py` 里的 CORSMiddleware | CORS 配置代码完成，走集成测试间接覆盖（没有专门测跨域请求本身）；限流已经作为真实依赖挂在 `/chat` 上，但**没有写"连续请求触发 429"的测试**，`TokenBucket` 本身的算法逻辑也没有单独单测，只是代码走查；日志脱敏单独用脚本验证过 `dashscope_api_key` 这类字段会被替换成 `***redacted***`，但还没接到 `main.py` 实际的请求日志里 |
 | Trace（结构化 span） | §11 | 已实现 | `backend/app/trace/tracer.py`, `GET /conversations/{id}/trace` | `backend/tests/test_app_integration.py` 里两个新用例 pytest 跑绿：真实走一轮天气对话后，trace 里能查到 `agent.invoke`/`tool.call:weather.get_weather_tips` 两个 span，状态和耗时都对；跨用户访问别人会话的 trace 会被拒绝（404）。范围边界：span 只到"网关发起工具调用"这一层，MCP transport 内部（比如 stdio 子进程里具体卡在哪一步）没有单独的 span；也没有做跨进程的分布式 trace context 传播——这些在 tracer.py 的注释里写清楚了，不算已实现 |
 | Eval 回归场景（mock 模式可跑） | §12 | 已实现 | `backend/eval/cases.py`, `runner.py`，`backend/tests/test_eval_cases.py` | 5 个脚本化场景（天气成功、写文件确认后执行、写文件拒绝后不执行、无关消息不触发工具、单 server 故障不影响其它工具）全部通过 `MockAgentModel` + 真实 MCP 子进程跑通，每个用例独立临时目录、互不干扰；接进了 pytest（`test_eval_cases.py`，5 用例跑绿），也能用 `python -m eval.runner` 单独跑出一份文本报告。额外做了一次"harness 自检"：故意写一个错误断言，确认 runner 真的会报 FAIL 而不是摆设 |
-| Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 未开始 | `frontend/src/` | - |
-| Playwright E2E | §12.9 | 未开始 | `frontend/e2e/` | - |
+| Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 已实现 | `frontend/src/` | 用内置浏览器手工走了一遍完整流程：注册→建会话→问天气（看到 tool_call/tool_result、不需要确认）→要求写笔记（看到确认卡→批准→看到执行成功，磁盘上真的多了文件）→再写一次→拒绝（看到"用户拒绝执行该操作"，磁盘上没有多文件）→同一会话里多轮历史正确保留。`thread_id` 全程前端拿不到，只有 `conversation_id`。类型检查（`vue-tsc -b`）和生产构建（`vite build`）都过 |
+| Playwright E2E | §12.9 | 已实现 | `frontend/e2e/chat.spec.ts` | 4 个用例真实跑通（装了 Chromium）：天气问答不触发确认、写文件确认后真执行、拒绝后不执行、密码错误显示不可重试的错误提示。Playwright 只管前端 dev server，后端需要单独起好（`frontend/e2e/README.md` 里写了原因和步骤）——没有为了"一键跑"把机器专属的 conda 路径硬编码进配置文件 |
 | Docker Compose 本地部署 | §11 | 未开始 | `ops/docker-compose.yml` | - |
 
 ## 说明
 
 - "状态"只有三档：未开始 / 进行中 / 已实现（代码+测试）。不写"已设计"，避免和档案里"候选设计 ≠ 已实现"的区分混淆。
 - 本文件不会跨仓库修改求职档案 `PROJECT_DOSSIER.md`；更新那份档案是用户自己的后续任务，这里只提供可引用的证据清单。
+- **前端已知范围边界**：切换/重新选中一个已有 conversation 时，界面上的消息时间线不会从后端拉历史重新渲染——它只在当前这次页面会话里，靠实时收到的 SSE 事件累积。服务端（LangGraph checkpoint）本身是有完整历史的，只是前端目前没有一个"拉取某个 conversation 历史消息"的接口和渲染逻辑去用它；刷新页面或切到另一个会话再切回来，之前的对话内容会从界面上消失（但数据没丢，重新发消息还是接着之前的状态走）。这不是这一阶段计划范围内的项，如实记在这里而不是含糊带过。
 
 ## 开发过程中发现的真问题（面试可以直接讲的坑）
 
