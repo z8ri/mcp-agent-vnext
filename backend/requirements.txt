@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 pydantic>=2
+pydantic[email]
 pydantic-settings
 sqlmodel
 greenlet

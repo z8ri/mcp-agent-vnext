@@ -50,13 +50,24 @@ def build_graph(model_with_tools: Runnable, gateway: GatewayClient, checkpointer
 
 
 def build_default_agent_graph(gateway: GatewayClient, checkpointer: BaseCheckpointSaver, *, model: Runnable | None = None):
-    """真实运行时用的入口：拿真实 ChatTongyi，绑定网关暴露的工具。"""
-    if model is None:
-        from langchain_community.chat_models import ChatTongyi
+    """真实运行时用的入口。
 
+    `MOCK_MODE=true`（没有 DASHSCOPE_API_KEY 时的默认值）用 `MockAgentModel`，
+    关键词触发工具调用，但网关和 MCP Server 都是真的——用来验证全链路通不通，
+    不是真实的模型推理能力。`MOCK_MODE=false` 才会真的去调通义千问。
+    """
+    if model is None:
         from app.config import get_settings
 
         settings = get_settings()
+        if settings.mock_mode:
+            from app.agent.mock_model import MockAgentModel
+
+            model = MockAgentModel()
+            return build_graph(model, gateway, checkpointer)
+
+        from langchain_community.chat_models import ChatTongyi
+
         model = ChatTongyi(model=settings.qwen_model, dashscope_api_key=settings.dashscope_api_key, streaming=True)
 
     model_with_tools = model.bind_tools(gateway.registry.bindable_tools())

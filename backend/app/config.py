@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
 
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
+    checkpoint_db_path: str = "./data/checkpoints.sqlite3"
+    idempotency_db_path: str = "./data/idempotency.sqlite3"
 
     cors_allowed_origins: str = "http://localhost:5173"
 

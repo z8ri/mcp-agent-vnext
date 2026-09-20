@@ -5,6 +5,8 @@ venv/
 .env
 *.db
 *.sqlite3
+data/
+output/
 node_modules/
 dist/
 .DS_Store

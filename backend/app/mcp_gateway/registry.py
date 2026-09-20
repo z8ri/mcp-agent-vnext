@@ -89,6 +89,10 @@ class ServerRegistry:
         for server_name in self.specs:
             await self.discover(server_name)
 
+    async def ping(self, server_name: str) -> None:
+        """健康检查用：只做只读的 `tools/list`，不执行任何工具，没有副作用。"""
+        await self._get_tools_for_server(server_name)
+
     def get(self, qualified_name: str) -> RegisteredTool | None:
         return self.tools.get(qualified_name)
 

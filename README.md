@@ -4,13 +4,14 @@
 
 这是对某求职机构提供的教学参考代码（`weather`/`write` 两个本地 MCP Server + LangGraph 预构建 ReAct Agent + Vue 单页聊天界面）的独立重写和扩展，目标是把参考代码中的教学简化点，实现为真正可运行、可验证的完整系统：
 
-- 自定义 LangGraph 状态图（而不是预构建 `create_react_agent`），显式区分 agent / tools / confirm(HITL) / finalize 节点
+- 自定义 LangGraph 状态图（而不是预构建 `create_react_agent`），显式区分 agent / tools / confirm(HITL) / finalize 节点，写文件这类有副作用的操作会让图真的暂停等人确认
 - MCP Tool Gateway：allowlist、超时、重试、熔断、健康检查、幂等键、单 Server 故障隔离
-- 真实多用户会话隔离：JWT 登录 + SessionManager（user → conversation → LangGraph thread）+ 同 thread 并发锁
+- 真实多用户会话隔离：JWT 登录 + SessionManager（user → conversation → LangGraph thread）+ 同 thread 并发锁，前端永远看不到、也改不了 `thread_id`
 - SQLite Checkpointer（跨重启恢复），而不是进程内 `InMemorySaver`
-- 真实 SSE 流式输出，修复参考代码中"关闭流式规避错误"的问题
+- SSE 按图的执行步骤增量推送（工具调用、确认请求、工具结果、最终消息），不是等全部跑完才一次性返回一个 JSON；逐 token 的模型级流式还没有用真实 Key 验证过，见 `VNEXT_STATUS.md`
+- `MOCK_MODE=true` 时用关键词触发的假模型驱动真实的 MCP Gateway/Server，不需要任何 API Key 就能把整条链路（注册登录 → 建会话 → 聊天 → 工具调用 → HITL 确认 → 写文件）跑通
 - 自建免 Key 地图 MCP Server（基于 OpenStreetMap Nominatim），替换参考代码中的占位符地图配置
-- 结构化 Trace / Eval 回归测试，可在没有真实 API Key 的情况下用 mock 模式跑通
+- 结构化 Trace / Eval 回归测试（规划中，见 `VNEXT_STATUS.md`）
 
 ## 目录结构
 
@@ -30,20 +31,51 @@ ops/            Docker Compose 与部署配置
 - **Python 3.11+**（`mcp`、`langgraph-checkpoint-sqlite` 等依赖要求 3.10+）。本机系统自带的是 Python 3.9，开发时用 conda 单独建了一个 3.11 环境，见下面的快速开始。
 - Node.js 18+（前端，Stage G 会补充版本锁定）。
 
-## 快速开始（后端，MCP Gateway 部分）
+## 快速开始
 
-用 conda（本仓库开发时用的方式，系统 Python 版本不够时的推荐做法）：
+用 conda（本仓库开发时用的方式，系统 Python 版本不够时的推荐做法；系统 Python 本身就是 3.11+ 的话用标准 venv 也一样）：
 
 ```bash
 conda create -n mcp-agent-vnext python=3.11
 conda activate mcp-agent-vnext
 
 pip install -r backend/requirements.txt
-cp .env.example .env   # 按需填 Key，MOCK_MODE=true 时可以先不填
+cp .env.example .env   # MOCK_MODE=true（默认值）时不需要填任何 Key
 
 pytest   # 跑 backend/tests 和 mcp_servers/tests，本仓库在这个环境下已跑绿
 ```
 
-如果系统 Python 本身就是 3.11+，用标准 venv 也一样：`python3 -m venv .venv && source .venv/bin/activate`。
+### 起后端、用 mock 模式试一遍完整链路（不需要任何 API Key）
 
-其余部分（Agent Harness、鉴权、API、前端、部署）会在后续阶段陆续补上对应的运行说明。
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+另开一个终端：
+
+```bash
+# 注册并拿到 token
+TOKEN=$(curl -s -X POST localhost:8000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"me@example.com","password":"correct horse battery staple"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+# 建一个会话
+CONV_ID=$(curl -s -X POST localhost:8000/conversations \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"demo"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+# 聊天（SSE），mock 模式下发"写"相关的话会触发写文件工具、需要走确认
+curl -N -X POST localhost:8000/chat \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"conversation_id\": $CONV_ID, \"message\": \"帮我写一个笔记\"}"
+
+# 上面那次会在 confirm_required 事件处结束；批准执行：
+curl -N -X POST localhost:8000/chat \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"conversation_id\": $CONV_ID, \"confirm\": true}"
+```
+
+`MOCK_MODE=false` 并填好 `DASHSCOPE_API_KEY` 之后，同一套 API 会换成真实调用通义千问；天气/地图工具本身默认不需要额外 Key（地图走自建的 Nominatim Server，天气没配 `OPENWEATHER_API_KEY` 时会返回结构化的"未配置"错误而不是崩溃）。
+
+前端和 Docker 部署会在后续阶段补上对应的运行说明。

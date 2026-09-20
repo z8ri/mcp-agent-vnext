@@ -15,6 +15,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from app.config import get_settings
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     key TEXT PRIMARY KEY,
@@ -27,10 +29,12 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 
 
 class IdempotencyStore:
-    def __init__(self, db_path: str = "./data/idempotency.sqlite3", ttl_seconds: float = 24 * 3600) -> None:
-        self._db_path = db_path
+    def __init__(self, db_path: str | None = None, ttl_seconds: float = 24 * 3600) -> None:
+        # 默认路径延迟到调用时才读 settings（而不是写死在参数默认值里），
+        # 这样测试用 monkeypatch 改 IDEMPOTENCY_DB_PATH 才能真的生效。
+        self._db_path = db_path or get_settings().idempotency_db_path
         self._ttl = ttl_seconds
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
     async def get(self, key: str) -> dict | None:
         async with aiosqlite.connect(self._db_path) as conn:

@@ -36,6 +36,9 @@ class GatewayClient:
     def _breaker_for(self, server: str) -> CircuitBreaker:
         return self._breakers.setdefault(server, CircuitBreaker(server))
 
+    def breaker_snapshot(self) -> dict[str, dict]:
+        return {name: breaker.snapshot() for name, breaker in self._breakers.items()}
+
     async def call(
         self,
         qualified_name: str,
