@@ -25,6 +25,21 @@ ops/            Docker Compose 与部署配置
 
 项目搭建中，详见 [VNEXT_STATUS.md](VNEXT_STATUS.md) 追踪各模块的实现进度。
 
-## 快速开始
+## 环境要求
 
-> 待补充——后续阶段完成后会在这里写清楚本地开发、Docker 一键启动、mock 模式与真实 Key 联调的步骤。
+- **Python 3.11+**（`mcp`、`langgraph-checkpoint-sqlite` 等依赖要求 3.10+；本仓库的代码是在没有 3.10+ 环境的机器上写的，还没有用真实依赖跑过，见 `VNEXT_STATUS.md` 里每个模块的验证状态）。
+- Node.js 18+（前端，Stage G 会补充版本锁定）。
+
+## 快速开始（后端，MCP Gateway 部分）
+
+```bash
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp ../.env.example ../.env   # 按需填 Key，MOCK_MODE=true 时可以先不填
+
+cd ..
+pytest   # 跑 backend/tests 和 mcp_servers/tests
+```
+
+其余部分（Agent Harness、鉴权、API、前端、部署）会在后续阶段陆续补上对应的运行说明。
