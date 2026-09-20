@@ -27,19 +27,23 @@ ops/            Docker Compose 与部署配置
 
 ## 环境要求
 
-- **Python 3.11+**（`mcp`、`langgraph-checkpoint-sqlite` 等依赖要求 3.10+；本仓库的代码是在没有 3.10+ 环境的机器上写的，还没有用真实依赖跑过，见 `VNEXT_STATUS.md` 里每个模块的验证状态）。
+- **Python 3.11+**（`mcp`、`langgraph-checkpoint-sqlite` 等依赖要求 3.10+）。本机系统自带的是 Python 3.9，开发时用 conda 单独建了一个 3.11 环境，见下面的快速开始。
 - Node.js 18+（前端，Stage G 会补充版本锁定）。
 
 ## 快速开始（后端，MCP Gateway 部分）
 
-```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp ../.env.example ../.env   # 按需填 Key，MOCK_MODE=true 时可以先不填
+用 conda（本仓库开发时用的方式，系统 Python 版本不够时的推荐做法）：
 
-cd ..
-pytest   # 跑 backend/tests 和 mcp_servers/tests
+```bash
+conda create -n mcp-agent-vnext python=3.11
+conda activate mcp-agent-vnext
+
+pip install -r backend/requirements.txt
+cp .env.example .env   # 按需填 Key，MOCK_MODE=true 时可以先不填
+
+pytest   # 跑 backend/tests 和 mcp_servers/tests，本仓库在这个环境下已跑绿
 ```
+
+如果系统 Python 本身就是 3.11+，用标准 venv 也一样：`python3 -m venv .venv && source .venv/bin/activate`。
 
 其余部分（Agent Harness、鉴权、API、前端、部署）会在后续阶段陆续补上对应的运行说明。

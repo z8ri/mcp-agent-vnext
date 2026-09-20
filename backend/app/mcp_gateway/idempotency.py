@@ -32,14 +32,9 @@ class IdempotencyStore:
         self._ttl = ttl_seconds
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    async def _connect(self) -> aiosqlite.Connection:
-        conn = await aiosqlite.connect(self._db_path)
-        await conn.execute(_SCHEMA)
-        await conn.commit()
-        return conn
-
     async def get(self, key: str) -> dict | None:
-        async with await self._connect() as conn:
+        async with aiosqlite.connect(self._db_path) as conn:
+            await conn.execute(_SCHEMA)
             cursor = await conn.execute(
                 "SELECT result_json, created_at FROM idempotency_keys WHERE key = ?", (key,)
             )
@@ -54,7 +49,8 @@ class IdempotencyStore:
             return json.loads(result_json)
 
     async def put(self, key: str, server: str, tool: str, result: dict) -> None:
-        async with await self._connect() as conn:
+        async with aiosqlite.connect(self._db_path) as conn:
+            await conn.execute(_SCHEMA)
             await conn.execute(
                 """
                 INSERT INTO idempotency_keys (key, server, tool, result_json, created_at)
