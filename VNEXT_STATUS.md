@@ -4,7 +4,7 @@
 
 最后更新：2026-09-20
 
-**总览**：下表 21 行里，18 行"已实现"（代码 + 真实测试/手工验证都有），3 行"进行中"（代码写了，但有具体没验证到的点——都写清楚了差在哪），0 行"未开始"。3 行"进行中"分别是：Weather Server 的 `query_weather`（缺 OPENWEATHER_API_KEY）、流式索引错误的根因复现（缺 DASHSCOPE_API_KEY）、限流/日志脱敏的专项测试（代码在，没写"触发 429"和"脱敏接入实际请求日志"的测试）。下面"下一步"列出了这些和其它值得继续做的事。
+**总览**：下表 21 行里，19 行"已实现"（代码 + 真实测试/手工验证都有），2 行"进行中"（代码写了，但有具体没验证到的点——都写清楚了差在哪），0 行"未开始"。2 行"进行中"分别是：Weather Server 的 `query_weather`（缺 OPENWEATHER_API_KEY）、限流/日志脱敏的专项测试（代码在，没写"触发 429"和"脱敏接入实际请求日志"的测试）。下面"下一步"列出了这些和其它值得继续做的事。
 
 **环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
 
@@ -20,10 +20,10 @@
 | 地图 MCP Server（免 Key，替换占位符） | §7, §12.3 | 已实现 | `mcp_servers/map_server.py` | Docker 里真实用 `streamable-http` transport 起来了，`/readyz` 显示 `map` 健康、`map.geocode`/`map.reverse_geocode` 可用；直接调用 `geocode({"query": "Eiffel Tower"})` 拿到真实 Nominatim 结果（`48.8582599, 2.2945006`）——这是本项目第一次真正验证这个 Server，之前一直因为没跑过而标"未开始" |
 | 自定义 LangGraph 图（agent/tools/confirm/finalize 节点与条件边） | §9 偏差 1, §11 | 已实现 | `backend/app/agent/graph.py`, `nodes.py`, `state.py` | `backend/tests/test_agent_graph.py`（2 用例）pytest 跑绿，用脚本化的 `FakeMessagesListChatModel` + 真实 weather/write 子进程做端到端验证：单 tool_call 走 HITL 暂停→批准→真的写文件；多 tool_call 批次里前面无副作用的先执行、遇到有副作用的暂停、拒绝后确实没有写文件 |
 | SQLite Checkpointer（替换 InMemorySaver） | §10.1 | 已实现 | `backend/app/agent/checkpointer.py` | 同上两个测试都依赖它跨越两次 `ainvoke` 调用恢复状态（`interrupt()` 暂停后重新 resume），验证了检查点真的持久化了状态，不是纯内存 |
-| 流式修复（`astream_events` 正确处理增量片段） | §9 偏差 4 | 进行中 | `backend/app/agent/graph.py`, `graph.py` 里的 `build_default_agent_graph` | `agent_node` 用 `.ainvoke()`（而不是手动拼流式片段）调用模型，原则上比参考代码手动处理 chunk 更不容易踩 index 错误；但真正的 token 级 SSE 流式在 Stage E 做，且没有 DASHSCOPE_API_KEY，没法验证 Tongyi 真实的流式分片行为是否触发过档案提到的那个 bug——**这里不编造一个没验证过的"已复现并修复"结论**，如实标成进行中 |
+| 流式修复（`astream_events` 正确处理增量片段） | §9 偏差 4 | 已实现 | `backend/app/agent/graph.py`, `graph.py` 里的 `build_default_agent_graph` | 账号欠费解决、模型名从 `qwen3.8-flash` 换成经典的 `qwen-plus` 之后，真实跑通了 `ChatTongyi(streaming=True)`：单轮纯聊天、天气工具调用（模型正确选了 `weather.get_weather_tips` 并推断出 `season=summer`）、写文件工具调用+HITL 暂停+批准+真实写盘，三种场景全部没有触发档案里说的那个流式索引错误。范围边界：只测了这几个基本场景，没有专门做长对话/高并发/多工具连续调用的压力测试，所以"验证过没崩"不等于"证明了所有场景下都不会崩"——如实写清楚测过什么，没有过度引申 |
 | JWT 鉴权 + 用户表 | §11 | 已实现 | `backend/app/auth/`, `backend/app/db/models.py` | `backend/tests/test_auth.py`（6 用例，含错误密码/重复邮箱/过期 token/篡改 token）+ `backend/tests/test_auth_dependencies.py`（4 用例，跑了一个真实 FastAPI+httpx ASGI 请求验证 `get_current_user` 依赖链）全部 pytest 跑绿 |
 | SessionManager（user→conversation→thread，同 thread 并发锁） | §10.1, §11 | 已实现 | `backend/app/sessions/manager.py` | `backend/tests/test_session_manager.py`（5 用例）pytest 跑绿：跨用户越权访问被拒绝、只能看到自己的 conversation 列表、同一 thread 的并发请求被 `asyncio.Lock` 严格串行化（用真实 `asyncio.gather` 竞争验证顺序，不是靠猜时序） |
-| FastAPI SSE `/chat`、分级错误事件 | §11 | 已实现 | `backend/app/api/routes_chat.py`, `sse.py` | `backend/tests/test_app_integration.py`（5 用例）pytest 跑绿 + 真实 `uvicorn` 起服务用 `curl` 手工过了一遍完整链路：注册→登录→建会话→"帮我写一个笔记"→SSE 收到 `tool_call`/`confirm_required`/`final`→提交 `confirm:true`→SSE 收到 `tool_result`/`message`，`backend/output/` 下真的多了一个内容正确的 `.txt` 文件 |
+| FastAPI SSE `/chat`、分级错误事件 | §11 | 已实现 | `backend/app/api/routes_chat.py`, `sse.py` | `backend/tests/test_app_integration.py`（5 用例）pytest 跑绿 + 真实 `uvicorn` 起服务用 `curl` 手工过了一遍完整链路：注册→登录→建会话→"帮我写一个笔记"→SSE 收到 `tool_call`/`confirm_required`/`final`→提交 `confirm:true`→SSE 收到 `tool_result`/`message`，`backend/output/` 下真的多了一个内容正确的 `.txt` 文件；`error` 事件这条路径也用真实通义千问 API 报错（见下方"真问题"）验证过，不是只在 mock 模式下测的 |
 | `/healthz` `/readyz` | §11 | 已实现 | `backend/app/api/routes_admin.py` | 同上，真实 curl 验证过两个端点，`/readyz` 能看到 per-server 健康状态和熔断器状态 |
 | CORS 白名单 / 限流 / 日志脱敏 | §10.3 | 进行中 | `backend/app/security/rate_limit.py`, `redaction.py`, `main.py` 里的 CORSMiddleware | CORS 配置代码完成，走集成测试间接覆盖（没有专门测跨域请求本身）；限流已经作为真实依赖挂在 `/chat` 上，但**没有写"连续请求触发 429"的测试**，`TokenBucket` 本身的算法逻辑也没有单独单测，只是代码走查；日志脱敏单独用脚本验证过 `dashscope_api_key` 这类字段会被替换成 `***redacted***`，但还没接到 `main.py` 实际的请求日志里 |
 | Trace（结构化 span） | §11 | 已实现 | `backend/app/trace/tracer.py`, `GET /conversations/{id}/trace` | `backend/tests/test_app_integration.py` 里两个新用例 pytest 跑绿：真实走一轮天气对话后，trace 里能查到 `agent.invoke`/`tool.call:weather.get_weather_tips` 两个 span，状态和耗时都对；跨用户访问别人会话的 trace 会被拒绝（404）。范围边界：span 只到"网关发起工具调用"这一层，MCP transport 内部（比如 stdio 子进程里具体卡在哪一步）没有单独的 span；也没有做跨进程的分布式 trace context 传播——这些在 tracer.py 的注释里写清楚了，不算已实现 |
@@ -42,12 +42,13 @@
 
 按价值排序，不是必须按顺序做：
 
-1. **补真实 Key，跑一次真实联调**：`DASHSCOPE_API_KEY`（必需）、`OPENWEATHER_API_KEY`（可选）。这是把"MOCK_MODE 全链路通"升级成"真的用通义千问推理"的唯一剩余步骤，本仓库现在完全具备条件，只是缺 Key。
-2. **流式索引错误**：有了 Qwen key 之后，`ChatTongyi(streaming=True)` 真实跑几轮多工具对话，看会不会复现档案里说的那个流式解析崩溃；如果复现，保留错误栈和最小复现场景，写成回归测试，再判断是不是需要额外处理（而不是像参考代码那样直接关闭流式）。
+1. ~~补真实 Key，跑一次真实联调~~ **已完成**：拿到 `DASHSCOPE_API_KEY` 后真实跑通了纯聊天、天气工具调用、写文件+HITL 全流程；模型名要用经典的 `qwen-plus`，账号百炼目录里那些新版本号命名（`qwen3.8-flash` 之类）会报 `InvalidParameter: url error`，`ChatTongyi`/经典 DashScope 接口不认。`OPENWEATHER_API_KEY` 还没补。
+2. ~~流式索引错误~~ **已完成（范围内）**：`streaming=True` 在上面几个场景里没有复现档案说的那个崩溃。还没做的：长对话、高并发、多个工具连续调用这些更复杂的场景没有专门压测过，真要写成回归测试还需要先弄清楚原来的崩溃具体触发条件是什么（档案本身也没留错误栈）。
 3. **限流与日志脱敏的专项测试**：`backend/tests/test_rate_limit.py`（连续请求触发 429、令牌桶恢复速率）+ 把 `redaction.py` 的处理器接到 `main.py` 实际的请求日志管线里并验证。
-4. **前端会话历史回放**：加一个 `GET /conversations/{id}/messages`（从 LangGraph checkpoint 读历史），切换/重新打开会话时前端拉一次渲染，补上 VNEXT_STATUS 里记的那个已知缺口。
-5. **故障注入测试**：真的把一个 MCP server 进程杀掉/让它超时，验证熔断器状态转移和重试退避在真实故障下的行为，而不是只靠单元测试里模拟的失败结果。
-6. **多 worker 部署**：如果真要多进程部署，`SessionManager` 的 `asyncio.Lock` 需要换成数据库行锁或 Redis 分布式锁——现在明确标了这个边界，不是文档遗漏。
+4. **补 `OPENWEATHER_API_KEY`，验证 `query_weather` 的重试/缓存逻辑**：现在这两块代码写了但从没真正触发过。
+5. **前端会话历史回放**：加一个 `GET /conversations/{id}/messages`（从 LangGraph checkpoint 读历史），切换/重新打开会话时前端拉一次渲染，补上 VNEXT_STATUS 里记的那个已知缺口。
+6. **故障注入测试**：真的把一个 MCP server 进程杀掉/让它超时，验证熔断器状态转移和重试退避在真实故障下的行为，而不是只靠单元测试里模拟的失败结果。
+7. **多 worker 部署**：如果真要多进程部署，`SessionManager` 的 `asyncio.Lock` 需要换成数据库行锁或 Redis 分布式锁——现在明确标了这个边界，不是文档遗漏。
 
 ## 开发过程中发现的真问题（面试可以直接讲的坑）
 
@@ -60,3 +61,6 @@
 - **这台机器一开始没装 Docker，装上之后引擎也起不来**：`brew install --cask docker` 第一次卡在一步需要终端交互输入密码的 `sudo`，用户自己在终端跑完；装完之后 Docker Desktop 的虚拟化引擎又卡在"Starting the Docker Engine..."一直连不上，日志里翻出根因是 `VZErrorDomain Code=1: Failed to install Rosetta`——Docker 自己内置的 Rosetta 安装器在这台机器上跑失败了。绕过的办法：直接用系统自带的 `softwareupdate --install-rosetta --agree-to-license` 把 Rosetta 装好（不走 Docker 那条坏掉的路径），再 `pkill` 掉卡死在空转的 `com.docker.backend` 残留进程、重新打开 Docker Desktop，虚拟机才正常拉起来。这个项目其实完全不需要 Rosetta——三个镜像（`python:3.11-slim`/`node:20-slim`/`nginx:alpine`）都原生支持 arm64，Rosetta 只在需要跑 x86_64 镜像时才用得上。
 - **`mcp` 包 2.x 是破坏性变更，两个 Dockerfile 装出了不一样的大版本**：`backend/Dockerfile` 因为同时装了 `langchain-mcp-adapters`，被它间接约束在 `mcp==1.30.0`；但 `mcp_servers/Dockerfile`（map-mcp 的独立镜像）只写了裸的 `pip install mcp`，构建时刚好撞上 PyPI 上更新的 `mcp==2.2.0`，而 2.x 把 `FastMCP` 改名成了 `MCPServer`，`map_server.py` 一启动就 `ModuleNotFoundError`。修复：两边都显式锁 `mcp<2`。这类"没有 lockfile、两个镜像各自解析出不同版本"的问题，只有真的在干净的容器里从头构建才会暴露——本机 conda 环境里那份 `mcp` 是几周前装的，一直没感知到 PyPI 上已经出了新的大版本。
 - **Streamable HTTP 的健康检查不能用"能不能拿到 2xx"来判断**：`map-mcp` 的 healthcheck 一开始是裸 `urllib.request.urlopen('http://localhost:8811/mcp')`，容器日志显示服务其实已经正常起来了，但健康检查一直失败——原因是 MCP 的 Streamable HTTP 端点对请求的 `Accept` header 有强制要求，不带正确 header 的裸 GET 会被协议层正确地返回 406，而 `urlopen` 对任何非 2xx 状态码都会抛 `HTTPError`。修复：健康检查显式 `except urllib.error.HTTPError: pass`——收到 HTTP 响应（哪怕是 406）就足够证明进程活着、在正常处理请求，不需要真的走完一次 MCP 握手。
+- **`Settings` 的 `.env` 路径是相对当前工作目录算的，`cd backend && uvicorn ...` 和在仓库根目录起是两个不同的 cwd**：第一次拿到真实 `DASHSCOPE_API_KEY` 联调时，`.env` 里明明写了 `MOCK_MODE=false`，但 `/chat` 还是返回 mock 模式的回复——因为 `pydantic-settings` 的 `env_file=".env"` 是相对路径，从 `backend/` 目录起服务时它去 `backend/.env` 找，找不到就静默退回默认值（`mock_mode: bool = True`），不报错也不提示。修复：`config.py` 把 `env_file` 锚定成 `Path(__file__).resolve().parents[2] / ".env"`，不再依赖启动时的 cwd。Docker 里不受影响，因为容器内环境变量是 `docker-compose.yml` 的 `env_file:`/`environment:` 直接注入的真实 OS 环境变量，优先级本来就高于任何 `.env` 文件。
+- **真实调用通义千问 API 第一次卡在账号欠费，不是代码问题**：配置修好、真 key 填好之后，第一次 `/chat` 请求返回的是通义千问 API 的 `400 Arrearage` 错误（阿里云账号欠费，被拒绝访问）。这个错误从 DashScope 一路被网关捕获、转成结构化 `error` SSE 事件、正确推给客户端，程序没有崩溃——等于顺带验证了一次真实的错误处理链路（此前这条路径只在 mock 模式下测过）。
+- **百炼目录里的新版本号模型名，`ChatTongyi` 不认**：账号欠费解决后，用账号免费额度页面显示的 `qwen3.8-flash` 当模型名，第一次真实推理请求直接报 `400 InvalidParameter: url error, please check url！`。换成经典的 `qwen-plus`（参考代码原本用的那个名字）就正常了——`langchain_community.chat_models.ChatTongyi` 走的是 DashScope 经典 `Generation` 接口，认的是 `qwen-turbo`/`qwen-plus`/`qwen-max` 这一族老式命名，账号新版"百炼"控制台里列出来的那些版本号式命名（`qwen3.8-flash`、`qwen3.8-max-0902` 这种）看起来是给别的（可能是 OpenAI 兼容模式）接口用的，不能直接套给经典接口。`.env.example` 和 `config.py` 里的默认值就是 `qwen-plus`，本身没写错，只是第一次按着控制台免费额度页面上看到的名字去填反而填错了。

@@ -77,7 +77,7 @@ curl -N -X POST localhost:8000/chat \
   -d "{\"conversation_id\": $CONV_ID, \"confirm\": true}"
 ```
 
-`MOCK_MODE=false` 并填好 `DASHSCOPE_API_KEY` 之后，同一套 API 会换成真实调用通义千问；天气/地图工具本身默认不需要额外 Key（地图走自建的 Nominatim Server，天气没配 `OPENWEATHER_API_KEY` 时会返回结构化的"未配置"错误而不是崩溃）。
+`MOCK_MODE=false` 并填好 `DASHSCOPE_API_KEY` 之后，同一套 API 会换成真实调用通义千问；天气/地图工具本身默认不需要额外 Key（地图走自建的 Nominatim Server，天气没配 `OPENWEATHER_API_KEY` 时会返回结构化的"未配置"错误而不是崩溃）。`QWEN_MODEL` 要填经典命名（默认值 `qwen-plus`）——阿里云百炼控制台"免费额度"页面里那些版本号式的模型名（比如 `qwen3.8-flash`）是给别的接口用的，直接填给这里会报 `400 InvalidParameter: url error`。这一整条链路（真实 Qwen 推理 + 真实工具调用 + HITL + 真实写文件）已经用真实 Key 验证过，见 `VNEXT_STATUS.md`。
 
 ### 查一次对话的 Trace
 

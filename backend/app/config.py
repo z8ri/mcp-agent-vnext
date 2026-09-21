@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# 锚定到仓库根目录的 .env，不依赖进程启动时的当前工作目录——
+# `cd backend && uvicorn app.main:app` 和直接在仓库根目录起是两个不同的 cwd，
+# 用相对路径 ".env" 会导致后一种情况悄悄读不到文件、静默退回默认值
+# （这个 bug 是真的在用真实 Key 测试时踩到的：MOCK_MODE=false 写进了 .env，
+# 但因为 cwd 是 backend/，Settings 没找到那个文件，还是跑的 mock 模型）。
+_REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_REPO_ROOT_ENV_FILE), env_file_encoding="utf-8", extra="ignore"
+    )
 
     mock_mode: bool = True
 
