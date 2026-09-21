@@ -1,6 +1,8 @@
 # MCP Agent vNext
 
-基于 MCP 多服务 + LangGraph 自定义图 + FastAPI + Vue3 的多工具 ReAct Agent，独立实现（JHU 2026 春季个人课程作业）。
+[![CI](https://github.com/z8ri/mcp-agent-vnext/actions/workflows/ci.yml/badge.svg)](https://github.com/z8ri/mcp-agent-vnext/actions/workflows/ci.yml)
+
+基于 MCP 多服务 + LangGraph 自定义图 + FastAPI + Vue3 的多工具 ReAct Agent，独立实现（JHU 2026 春季个人课程作业）。仓库：[github.com/z8ri/mcp-agent-vnext](https://github.com/z8ri/mcp-agent-vnext)
 
 这是对某求职机构提供的教学参考代码（`weather`/`write` 两个本地 MCP Server + LangGraph 预构建 ReAct Agent + Vue 单页聊天界面）的独立重写和扩展，目标是把参考代码中的教学简化点，实现为真正可运行、可验证的完整系统：
 
@@ -15,7 +17,7 @@
 - Eval 回归套件（`backend/eval/`）：5 个脚本化场景（天气成功、写文件确认执行、写文件拒绝不执行、无关消息不触发工具、单 server 故障不影响其它工具），`MOCK_MODE` 下不需要任何 Key 就能跑，`python -m eval.runner` 单独跑出报告，也接进了 `pytest`
 - 成本预算：按用户累计通义千问 token 花费，超预算 `/chat` 会用 402 拦住，不等花超了才后悔；`GET /budget` 查当前用量
 - Bad Case 收集：eval 跑失败的场景、`/chat` 里真实出现的 error，都汇总进同一张表，`GET /bad-cases` 能查——不是只有预先写好的几个场景才算"案例"
-- CI：GitHub Actions 跑后端 `pytest`（带覆盖率报告）+ Alembic 迁移校验 + 前端类型检查/构建，不需要真实 API Key；仓库还没推远程，这一条还没在真正的 Actions 里跑过一次，如实标注
+- CI：GitHub Actions 跑后端 `pytest`（带覆盖率报告）+ Alembic 迁移校验 + 前端类型检查/构建，不需要真实 API Key；已经真实推送并在 Actions 里跑绿过，见仓库的 Actions 页面
 - 业务数据库（User/Conversation）接了 Alembic 版本化迁移；`trace_spans`/`idempotency_keys`/`bad_cases` 这类独立日志表启动时会做一次轻量数据保留清理，不会无限增长
 
 ## 目录结构
@@ -54,7 +56,7 @@ pytest   # 跑 backend/tests 和 mcp_servers/tests，本仓库在这个环境下
 
 ### 持续集成
 
-`.github/workflows/ci.yml` 会在 push/PR 时跑一遍后端 `pytest`（含上面那份覆盖率报告）、Alembic 基线迁移的 upgrade/downgrade、前端 `vue-tsc` 类型检查 + `vite build`——都不需要真实 API Key。这样"测试是不是真的绿的"不用再靠我口头转述，谁都能去看 Actions 的运行结果。**这份仓库目前还没推到 GitHub 远程**，所以这个 workflow 还没真的在 Actions 里跑过一次，只在本地把 workflow 里同样的命令都单独跑过、确认过了；等仓库有了远程仓库、真正推送一次之后，才算这一条被完整验证。
+`.github/workflows/ci.yml` 会在 push/PR 时跑一遍后端 `pytest`（含上面那份覆盖率报告）、Alembic 基线迁移的 upgrade/downgrade、前端 `vue-tsc` 类型检查 + `vite build`——都不需要真实 API Key。这样"测试是不是真的绿的"不用再靠我口头转述，谁都能去看 Actions 的运行结果：[github.com/z8ri/mcp-agent-vnext/actions](https://github.com/z8ri/mcp-agent-vnext/actions)。已经真实推送过、在 GitHub Actions 里跑绿过（两个 job 都通过），不是只在本地跑过同样的命令。
 
 ### 起后端、用 mock 模式试一遍完整链路（不需要任何 API Key）
 
