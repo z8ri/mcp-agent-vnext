@@ -185,6 +185,10 @@ async def get_budget_status(request: Request, user: User = Depends(get_current_u
         "tokens": status_obj.tokens,
         "limit_usd": status_obj.limit_usd,
         "exceeded": status_obj.exceeded,
+        # 价格表是近似值，写在这里是为了让调用方（不只是看代码的人）也能
+        # 看到这个数字没有拿真实账单验证过，以及它是哪天写的、可能已经过期。
+        "price_table_as_of": status_obj.price_table_as_of,
+        "price_table_validated_against_real_billing": status_obj.price_table_validated_against_real_billing,
     }
 
 

@@ -1,0 +1,61 @@
+name: CI
+
+# 之前"pytest 68 个用例跑绿"完全靠口头转述——除非自己装好 conda + Node
+# 环境，没有别的办法验证。这个 workflow 让 GitHub 在每次 push/PR 上真的
+# 跑一遍测试，验证结果直接挂在 commit 状态和 PR 检查里，不用信我说的话。
+#
+# 只覆盖不需要真实 API Key 的部分：MOCK_MODE 默认就是 true，后端测试全程
+# 用假模型 + respx mock 的 HTTP 响应；Docker 镜像构建暂时没有接进来
+# （需要额外的 registry/缓存配置，超出这个 workflow 现在要解决的问题，
+# 如实记在这里而不是假装已经做了）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run pytest (backend/tests + mcp_servers/tests, MOCK_MODE, coverage)
+        run: pytest
+        env:
+          MOCK_MODE: "true"
+
+      - name: Verify Alembic baseline migration applies cleanly
+        working-directory: backend
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade base
+        env:
+          DATABASE_URL: "sqlite+aiosqlite:///${{ runner.temp }}/ci_alembic_check.db"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type-check and build
+        working-directory: frontend
+        run: npm run build

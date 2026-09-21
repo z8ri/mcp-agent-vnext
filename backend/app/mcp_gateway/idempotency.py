@@ -66,3 +66,18 @@ class IdempotencyStore:
                 (key, server, tool, json.dumps(result), time.time()),
             )
             await conn.commit()
+
+    async def purge_expired(self) -> int:
+        """主动清掉所有已过 TTL 的行，返回删掉的行数。
+
+        `get()` 里原来的过期判断是懒惰的——只有真的再查一次同一个 key
+        才会顺手删掉它；一个 key 如果之后再也没被查过，就会永远留在表里，
+        `idempotency_keys` 会跟着请求量单调增长。这个方法用于服务启动时
+        主动扫一遍（见 `main.py` 的 lifespan），不依赖"之后有没有人再查它"。
+        """
+        cutoff = time.time() - self._ttl
+        async with aiosqlite.connect(self._db_path) as conn:
+            await conn.execute(_SCHEMA)
+            cursor = await conn.execute("DELETE FROM idempotency_keys WHERE created_at < ?", (cutoff,))
+            await conn.commit()
+            return cursor.rowcount

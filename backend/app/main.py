@@ -57,11 +57,26 @@ async def lifespan(app: FastAPI):
         capacity=settings.rate_limit_capacity,
         refill_per_second=settings.rate_limit_refill_per_minute / 60,
     )
-    app.state.tracer = Tracer(db_path=settings.trace_db_path)
+    app.state.tracer = Tracer(db_path=settings.trace_db_path, retention_days=settings.trace_retention_days)
     app.state.budget_tracker = BudgetTracker(
         db_path=settings.budget_db_path, max_cost_usd_per_user=settings.budget_max_cost_usd_per_user
     )
     app.state.bad_case_store = BadCaseStore(db_path=settings.bad_case_db_path)
+
+    # 轻量保留策略：没有引入额外的定时任务框架，每次进程启动时清一次
+    # trace_spans 的过期 span、idempotency_keys 的过期幂等键、bad_cases 里
+    # 早就处理完的旧记录——对这个项目的规模够用；真要 7x24 常驻部署，
+    # 这里应该换成独立的定时任务而不是"重启时才清一次"。
+    purged_spans = await app.state.tracer.purge_older_than()
+    purged_keys = await gateway.idempotency_store.purge_expired()
+    purged_bad_cases = await app.state.bad_case_store.purge_resolved()
+    if purged_spans or purged_keys or purged_bad_cases:
+        logger.info(
+            "startup_retention_purge",
+            purged_trace_spans=purged_spans,
+            purged_idempotency_keys=purged_keys,
+            purged_resolved_bad_cases=purged_bad_cases,
+        )
 
     async with sqlite_checkpointer(settings.checkpoint_db_path) as checkpointer:
         app.state.graph = build_default_agent_graph(gateway, checkpointer, tracer=app.state.tracer)

@@ -37,7 +37,14 @@ CREATE TABLE IF NOT EXISTS budget_usage (
 CREATE INDEX IF NOT EXISTS idx_budget_usage_user ON budget_usage (user_id, recorded_at);
 """
 
-# 每 1K token 的近似价格（美元）：(input, output)。数量级参考，不是实时价格。
+# 每 1K token 的近似价格（美元）：(input, output)。数量级参考，不是实时价格，
+# 也从没有拿真实账单交叉验证过——只验证了"token 数统计对不对"，没验证过
+# "算出来的美元数字跟阿里云实际扣费对不对"。写死一个日期，是为了让"这份价格
+# 有没有过期"这件事变得可检查，而不是含糊地留在代码里没人知道它多旧。
+# 阿里云调价后这里不会自动感知，需要人工回来对一遍价格页面再改这个日期。
+PRICE_TABLE_AS_OF = "2026-09-20"
+PRICE_TABLE_VALIDATED_AGAINST_REAL_BILLING = False
+
 _MODEL_PRICE_PER_1K_TOKENS_USD: dict[str, tuple[float, float]] = {
     "qwen-turbo": (0.0003, 0.0006),
     "qwen-plus": (0.0008, 0.002),
@@ -56,6 +63,8 @@ class BudgetStatus:
     cost_usd: float
     tokens: int
     limit_usd: float
+    price_table_as_of: str = PRICE_TABLE_AS_OF
+    price_table_validated_against_real_billing: bool = PRICE_TABLE_VALIDATED_AGAINST_REAL_BILLING
 
     @property
     def exceeded(self) -> bool:

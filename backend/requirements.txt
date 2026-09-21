@@ -22,6 +22,9 @@ structlog
 pyyaml
 python-dotenv
 
+alembic
+
 pytest
 pytest-asyncio
+pytest-cov
 respx

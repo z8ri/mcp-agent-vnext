@@ -15,6 +15,8 @@
 - Eval 回归套件（`backend/eval/`）：5 个脚本化场景（天气成功、写文件确认执行、写文件拒绝不执行、无关消息不触发工具、单 server 故障不影响其它工具），`MOCK_MODE` 下不需要任何 Key 就能跑，`python -m eval.runner` 单独跑出报告，也接进了 `pytest`
 - 成本预算：按用户累计通义千问 token 花费，超预算 `/chat` 会用 402 拦住，不等花超了才后悔；`GET /budget` 查当前用量
 - Bad Case 收集：eval 跑失败的场景、`/chat` 里真实出现的 error，都汇总进同一张表，`GET /bad-cases` 能查——不是只有预先写好的几个场景才算"案例"
+- CI：GitHub Actions 跑后端 `pytest`（带覆盖率报告）+ Alembic 迁移校验 + 前端类型检查/构建，不需要真实 API Key；仓库还没推远程，这一条还没在真正的 Actions 里跑过一次，如实标注
+- 业务数据库（User/Conversation）接了 Alembic 版本化迁移；`trace_spans`/`idempotency_keys`/`bad_cases` 这类独立日志表启动时会做一次轻量数据保留清理，不会无限增长
 
 ## 目录结构
 
@@ -47,6 +49,12 @@ cp .env.example .env   # MOCK_MODE=true（默认值）时不需要填任何 Key
 
 pytest   # 跑 backend/tests 和 mcp_servers/tests，本仓库在这个环境下已跑绿
 ```
+
+`pytest.ini` 接了 `pytest-cov`，每次跑 `pytest` 都会带一份 `backend/app` 的行覆盖率报告；这台机器上最近一次是 72 个用例、94% 行覆盖率（`mcp_servers/*` 是独立子进程，跨进程边界 coverage.py 量不到，不算在这个数字里，如实说明范围）。
+
+### 持续集成
+
+`.github/workflows/ci.yml` 会在 push/PR 时跑一遍后端 `pytest`（含上面那份覆盖率报告）、Alembic 基线迁移的 upgrade/downgrade、前端 `vue-tsc` 类型检查 + `vite build`——都不需要真实 API Key。这样"测试是不是真的绿的"不用再靠我口头转述，谁都能去看 Actions 的运行结果。**这份仓库目前还没推到 GitHub 远程**，所以这个 workflow 还没真的在 Actions 里跑过一次，只在本地把 workflow 里同样的命令都单独跑过、确认过了；等仓库有了远程仓库、真正推送一次之后，才算这一条被完整验证。
 
 ### 起后端、用 mock 模式试一遍完整链路（不需要任何 API Key）
 
@@ -128,3 +136,19 @@ docker compose -f ops/docker-compose.yml up --build
 `backend-data`/`backend-output` 是具名 volume，装的是 SQLite 数据库文件和 `write_file` 落盘的内容，`docker compose down` 不会删，`docker compose down -v` 才会。
 
 `docker compose up -d --build` 已经真实跑通过：三个容器按顺序变 healthy，`/readyz` 里 `map`/`weather`/`write` 三个工具都可用，`map.geocode` 真的查到了 Nominatim 的数据，浏览器打开前端也真的连上了容器里的后端。过程中修了两个只有在干净容器里从头构建才会暴露的问题：`mcp` 包在两个镜像里解析出了不同的大版本（要锁 `mcp<2`），以及 map-mcp 的健康检查一开始把 Streamable HTTP 端点对 406 的正常响应误判成"挂了"——都已经修好，细节见 `VNEXT_STATUS.md`。
+
+## 数据库 Schema 迁移
+
+业务库（`User`/`Conversation`，`backend/app/db/models.py`）用 [Alembic](https://alembic.sqlalchemy.org/) 管理版本化迁移，起服务时仍然是 `SQLModel.metadata.create_all()`（图快，见 `db/engine.py` 的 `init_db()`），但**改已有表结构**（加字段、改约束）应该走 Alembic，而不是直接改 `models.py` 指望 `create_all` 把已有数据库也改对——`create_all` 只会建"不存在的表"，不会给已有表加新列。
+
+```bash
+cd backend
+python -m alembic upgrade head       # 应用所有迁移到 DATABASE_URL 指向的库
+python -m alembic revision --autogenerate -m "描述这次改了什么"   # 改完 models.py 后生成新迁移
+```
+
+**范围边界**：`idempotency_keys`/`trace_spans`/`budget_usage`/`bad_cases` 这几张表不归 Alembic 管——它们各自是独立 SQLite 文件里的单表日志/缓存，用裸 `CREATE TABLE IF NOT EXISTS` 建表，只增不改列，这个机制本身就够用；接进 Alembic 反而是过度设计。这是有意的范围划分，不是漏做。
+
+## 数据保留
+
+`trace_spans` 每次模型/工具调用都落一条，长期跑会无限增长；`idempotency_keys` 有 TTL 但原来是懒惰过期（没人查的过期 key 会一直留着）；`bad_cases` 里已经标记"已处理"的旧记录也没有清理机制。现在服务**每次启动时**会主动清一次：过期的幂等键、超过 `TRACE_RETENTION_DAYS`（默认 30 天）的 trace span、已处理超过 30 天的 bad case。没有引入额外的定时任务框架——这个粒度对这个项目的规模够用，真要 7x24 常驻部署应该换成独立的定时任务，而不是"重启时才清一次"，这个边界如实记在这里。

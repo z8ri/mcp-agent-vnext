@@ -91,6 +91,21 @@ class BadCaseStore:
             await conn.execute("UPDATE bad_cases SET resolved = 1 WHERE id = ?", (case_id,))
             await conn.commit()
 
+    async def purge_resolved(self, older_than_days: float = 30) -> int:
+        """删掉早就标记为"已处理"、且已经过了保留期的记录，返回删掉的行数。
+
+        未处理的记录永远不删——这张表本身就是"还有什么问题没查"的清单，
+        删掉未处理的等于把问题藏起来。只清理已经处理完、留着仅供追溯的旧记录。
+        """
+        cutoff = time.time() - older_than_days * 86400
+        async with aiosqlite.connect(self._db_path) as conn:
+            await conn.execute(_SCHEMA)
+            cursor = await conn.execute(
+                "DELETE FROM bad_cases WHERE resolved = 1 AND recorded_at < ?", (cutoff,)
+            )
+            await conn.commit()
+            return cursor.rowcount
+
     @staticmethod
     def _row_to_case(row: tuple[Any, ...]) -> BadCase:
         case_id, source, context, error_code, error_message, thread_id, user_id, resolved, recorded_at = row

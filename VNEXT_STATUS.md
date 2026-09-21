@@ -2,11 +2,13 @@
 
 逐项对照求职档案 `PROJECT_DOSSIER.md` 第 11 节候选架构与第 12 节验证清单。只有代码 + 测试都落地才标"已实现"；只有设计没有代码的一律"未开始"。
 
-最后更新：2026-09-20
+最后更新：2026-09-20（工程化收尾一轮）
+
+**这一轮是什么**：用户直接问"你认为这个项目还有哪些不完善的"，这次不是照着档案第 11 节逐条核对（那份清单已经全部"已实现"），而是我自己往外多看一层——档案本身没提、但一个"正式项目"该有的工程化基础设施：CI、数据保留、schema 迁移、价格表版本化、覆盖率量化。用户直接说"这些都改一下"，这一轮补的就是这五项，细节见下面新增的"工程化收尾"表。
 
 **总览**：下表 23 行全部"已实现"（代码 + 真实测试/手工验证都有）。原来剩的两项"进行中"（`query_weather` 的重试/缓存、限流+日志脱敏的专项测试）用户直接问了"为什么不去做"——确认之后发现两项都不需要真实 Key（respx mock HTTP 响应即可、限流和日志脱敏本来就不依赖外部服务），只是之前没有回头补，补上了。之后用户又问"是不是完美达到了 vNext 的 spec"，逼着重新核对了一遍最初的候选架构文本，发现候选架构"横切能力"里明确列出的**成本与延迟预算**和 **Bad Case 收集**两项，之前整个实现过程里完全没做、也没有在这份文档里追踪过——不是"进行中"被漏标，是彻底漏掉了。这一轮把这两项也补上了，细节见下表最后两行。仍然值得继续做的事在下面"下一步"里；这份文档本身就是"曾经漏掉过东西、发现了就诚实补上"的例子，不是一次性写对的。
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（68 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（72 个用例，`backend/app` 行覆盖率 94%）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -33,6 +35,18 @@
 | Docker Compose 本地部署 | §11 | 已实现 | `ops/docker-compose.yml`, `backend/Dockerfile`, `mcp_servers/Dockerfile`, `frontend/Dockerfile` | `docker compose up -d --build` 真实跑通，三个容器按 `depends_on`+healthcheck 顺序起来（`map-mcp` healthy → `backend` healthy → `frontend`）；容器化的后端跑通了注册→登录→建会话→聊天→工具调用全流程，浏览器打开 `localhost:5173` 真实连上了容器化后端并拿到之前 curl 建的会话。这台机器一开始没装 Docker、装完后引擎起不来，排查过程和修复见下面"真问题"部分 |
 | 成本与延迟预算 | §11 横切能力 | 已实现 | `backend/app/budget/tracker.py`, `GET /budget` | 之前完全漏掉、这轮才补上的一项。按用户累计通义千问 token 花费（`ChatTongyi` 的用量在 `response_metadata["token_usage"]` 里，不是 LangChain 标准的 `usage_metadata` 字段——这是真的调真实 Qwen 核实过的，不是照文档猜的），价格表是近似值不是实时计费 API；累计花费超过预算，`/chat` 会在真正调模型之前用 402 拦住，不是打完钱才后悔。`backend/tests/test_budget.py`（6 用例）+ `test_budget_and_bad_cases_integration.py` 部分用例 pytest 跑绿：新用户零花费、多轮累加、按用户隔离、超预算真实触发 402；另外真起服务器验证过一轮正常对话后 `/budget` 显示的数字符合预期。延迟目前只记录（每个 `agent.invoke` span 的 `duration_ms` 累加），没有做"超过延迟预算就报警/降级"这一半 |
 | Bad Case 收集 | §11 横切能力 | 已实现 | `backend/app/badcases/store.py`, `GET /bad-cases` | 之前也是完全漏掉的一项。两个来源写进同一张表：`eval/runner.py` 跑失败的场景、`/chat` 真实出现的 `error` 事件（通过 `stream_graph_turn` 新增的 `on_error` 回调）。`backend/tests/test_bad_cases.py`（3 用例）+ 集成测试 pytest 跑绿；另外做了端到端的真实验证：起一个真实服务器、故意跑一个断言写错的 eval 场景（独立的 Python 进程），再用 curl 查服务器的 `GET /bad-cases`，确认真的能看到那条失败记录——证明 eval 和生产用的是同一份持久化数据，不是各测各的。范围边界：没有做角色/权限系统，现在任何登录用户都能看 `/bad-cases`，生产上应该收窄成运维角色，如实记在这里 |
+
+## 工程化收尾（不在档案第 11 节里，是自己主动审出来的缺口）
+
+档案第 11 节的候选架构是产品/业务视角的清单，上面那张表已经全部对照完了。下面这五项是"要撑得起一个能被信任的正式项目"这个更高标准下、之前完全没被追踪过的工程化基础设施缺口——用户直接问"你认为这个项目还有哪些不完善的"逼出来的，不是照抄档案。
+
+| 项目 | 状态 | 代码位置 | 测试/验证 |
+| --- | --- | --- | --- |
+| CI（GitHub Actions） | 已实现（未在真实 Actions 里跑过） | `.github/workflows/ci.yml` | workflow 里的每条命令（`pytest`、`alembic upgrade head` + `downgrade base`、`npm run build`）都在本地单独跑通过，YAML 语法用 `yaml.safe_load` 校验过；但这个仓库还没有 GitHub 远程、没推送过，所以这个 workflow 本身从没有真的在 GitHub Actions 里跑过一次。这条边界如实标注，不假装"接了 CI"等于"CI 跑过了" |
+| 测试覆盖率量化 | 已实现 | `pytest.ini`（`addopts = --cov=app --cov-report=term-missing`） | 真实跑出的数字：72 个用例、`backend/app` 行覆盖率 94%（`backend/app/mcp_gateway/client.py`/`registry.py`/`health.py` 里没覆盖到的主要是一些真实网络故障的边缘分支）。`mcp_servers/*`（weather/write/map 三个 Server）是独立子进程跑的，coverage.py 量不到跨进程边界，没有硬凑一个数字进去，这个范围边界写在 README 里 |
+| 数据保留（trace/idempotency/bad_cases 清理） | 已实现 | `Tracer.purge_older_than()`、`IdempotencyStore.purge_expired()`、`BadCaseStore.purge_resolved()`，在 `main.py` 的 lifespan 里启动时调用 | `backend/tests/test_tracer.py`（2 用例）、`test_idempotency.py` 新增的 purge 用例、`test_bad_cases.py` 新增的 purge 用例，全部 pytest 跑绿；真起了一次服务器确认启动不报错（细节见下面"真问题"，过程中就地发现并修好了第一版测试本身的一个逻辑错误）。没有引入定时任务框架，只在进程启动时清一次——这个粒度对当前规模够用，7x24 部署需要独立定时任务，如实标注 |
+| 业务数据库 Schema 迁移（Alembic） | 已实现 | `backend/alembic/`（`env.py`、`0001_initial_schema.py`） | 真实用 `alembic revision --autogenerate` 生成了对照 `User`/`Conversation` 现状的基线迁移；然后真实验证了一整轮：`upgrade head` 建表成功 → 再跑一次 `autogenerate` 确认和 `models.py` 完全对得上（没有多余的 diff）→ `downgrade base` 能干净地撤销。范围边界：`idempotency_keys`/`trace_spans`/`budget_usage`/`bad_cases` 这几张独立日志/缓存表不归 Alembic 管，继续用 `CREATE TABLE IF NOT EXISTS`——这是有意的范围划分（写在 `alembic/env.py` 的注释和 README 里），不是漏做 |
+| 成本预算价格表版本化 | 已实现 | `backend/app/budget/tracker.py` 的 `PRICE_TABLE_AS_OF`/`PRICE_TABLE_VALIDATED_AGAINST_REAL_BILLING`，`GET /budget` 响应体 | 真起服务器、真实 curl 过 `/budget`，确认这两个字段真的在响应里（不只是写在代码注释里没人看得到）：`"price_table_as_of": "2026-09-20", "price_table_validated_against_real_billing": false`。这本身没有让价格更准，只是让"这份价格是不是过期的"从只有看代码的人才知道，变成调用方也能直接查到 |
 
 ## 说明
 
@@ -70,4 +84,6 @@
 - **百炼目录里的新版本号模型名，`ChatTongyi` 不认**：账号欠费解决后，用账号免费额度页面显示的 `qwen3.8-flash` 当模型名，第一次真实推理请求直接报 `400 InvalidParameter: url error, please check url！`。换成经典的 `qwen-plus`（参考代码原本用的那个名字）就正常了——`langchain_community.chat_models.ChatTongyi` 走的是 DashScope 经典 `Generation` 接口，认的是 `qwen-turbo`/`qwen-plus`/`qwen-max` 这一族老式命名，账号新版"百炼"控制台里列出来的那些版本号式命名（`qwen3.8-flash`、`qwen3.8-max-0902` 这种）看起来是给别的（可能是 OpenAI 兼容模式）接口用的，不能直接套给经典接口。`.env.example` 和 `config.py` 里的默认值就是 `qwen-plus`，本身没写错，只是第一次按着控制台免费额度页面上看到的名字去填反而填错了。
 - **对着最初的候选架构文本重新核对了一遍，发现"成本与延迟预算"和"Bad Case 收集"两项完全没做**：不是代码漏了几行，是从头到尾都没实现过，`VNEXT_STATUS.md` 里之前甚至都没有对应的行去追踪。原因是候选架构原文那段"横切能力"列了很多项（数据库 Checkpointer、并发控制、幂等键、HITL、Trace/Eval/Bad Case、密钥与日志脱敏、成本与延迟预算、健康检查……），实现过程里逐项对照的时候把这两项漏看了，后面每轮更新 `VNEXT_STATUS.md` 也没人回头去跟原文再核对一遍，缺口就一直没暴露。这次是用户直接问"是不是完美达到了 spec"，倒逼着重新逐字核对原文才发现的——说明"自己维护的进度追踪表"本身也可能是不准的，得偶尔跟最初的需求文本重新核对，不能只信自己写的状态表。
 - **`budget/tracker.py` 的 schema 建表语句踩了和 `idempotency.py`/`tracer.py` 一开始类似的坑**：schema 里有 `CREATE TABLE` 和 `CREATE INDEX` 两条语句，但用的是只能执行单条语句的 `conn.execute(_SCHEMA)`，一跑测试直接报 `sqlite3.ProgrammingError: You can only execute one statement at a time`。改成 `conn.executescript(_SCHEMA)`（跟 `tracer.py` 里一致的写法）就好了——这类 bug 每次都是新模块照着旧模块"抄"的时候，抄的是单表 schema 那个（比如 `idempotency.py`，只有一条 `CREATE TABLE`，`execute()` 刚好能跑），没意识到自己这次多加了一条索引语句，两种 schema 复杂度不一样，不能照抄同一个执行方式。
+- **`alembic revision --autogenerate` 生成的迁移文件本身有 bug，得跑起来才发现**：自动生成的 `0001_initial_schema.py` 用了 `sqlmodel.sql.sqltypes.AutoString()`，但文件顶部只 `import sqlalchemy as sa`，没有 `import sqlmodel`——这是 Alembic 自动生成代码的已知瑕疵（它知道类型叫什么，但不总是记得帮你把对应的 import 也加上）。直接看生成的代码走查完全看不出问题（`AutoString` 这个名字本身没写错），只有真的跑一次 `alembic upgrade head` 才会报 `NameError: name 'sqlmodel' is not defined`。补上 `import sqlmodel` 之后，再跑一遍完整的 `upgrade head → autogenerate（确认无 diff）→ downgrade base` 才敢把这一项标成"已实现"。
+- **第一版 purge 测试自己的逻辑就是错的，不是被测代码错**：`IdempotencyStore.purge_expired()` 用的是"调用它的这个实例的 TTL"去清整张表，不是"每一行按当初写它的那个实例的 TTL"分别判断——这本身是对的（现实中一个进程只有一个共享实例）。但第一版测试构造了两个不同 TTL 的 `IdempotencyStore` 实例去写同一张表，断言"用短 TTL 的实例 purge 之后，用长 TTL 的实例写的那条应该还在"，这个断言本身建立在一个不成立的前提上，一跑就 `assert 3 == 2` 失败。改成用同一个实例、直接改 `created_at` 模拟"很久以前写的"之后才对——提醒自己：测试断言失败时，先怀疑测试本身的前提是不是站得住，不要想当然地先去改被测代码。
 - **新加两个数据库配置项，只在新测试文件里做了隔离，忘了同步到已有的测试文件**：`main.py` 的 lifespan 新增了 `BudgetTracker`/`BadCaseStore`，都是用 `settings.budget_db_path`/`settings.bad_case_db_path`（默认相对路径 `./data/...`）。写新测试（`test_budget_and_bad_cases_integration.py`）的时候记得把 `BUDGET_DB_PATH`/`BAD_CASE_DB_PATH` 隔离到 `tmp_path`，但 `test_app_integration.py`、`test_rate_limit.py`、`test_request_logging_redaction.py` 这三个本来就存在、也会走 `create_app()` 完整生命周期的测试文件没有同步更新——结果每次跑完整套 `pytest`，这三个文件的用例都会在仓库根目录悄悄建出真实的 `data/budget.sqlite3`、`data/bad_cases.sqlite3`，污染工作区（`git status` 能看到，但很容易被忽略过去）。修复：把这两行 `monkeypatch.setenv` 同步加到所有四个用 `create_app()` 的测试 fixture 里。教训：给共享的应用状态加新的持久化资源时，"隔离测试环境"这件事要对所有用到完整 app 生命周期的测试文件做一遍检查，不能只改自己当次新写的那一个文件。

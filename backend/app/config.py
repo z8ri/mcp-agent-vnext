@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # 价格表是近似值，不是阿里云的实时计费 API，用来做数量级预算控制。
     budget_max_cost_usd_per_user: float = 1.0
 
+    # trace_spans 表每次模型/工具调用都落一条，没有清理会无限增长；
+    # 进程启动时清一次超过这个天数的旧 span，见 main.py 的 lifespan。
+    trace_retention_days: float = 30
+
     cors_allowed_origins: str = "http://localhost:5173"
 
     rate_limit_capacity: int = 10
