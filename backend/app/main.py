@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agent.checkpointer import sqlite_checkpointer
 from app.agent.graph import build_default_agent_graph
 from app.api import routes_admin, routes_auth, routes_chat
+from app.badcases.store import BadCaseStore
+from app.budget.tracker import BudgetTracker
 from app.config import get_settings
 from app.db.engine import init_db, make_engine, make_session_factory
 from app.mcp_gateway.client import GatewayClient
@@ -56,6 +58,10 @@ async def lifespan(app: FastAPI):
         refill_per_second=settings.rate_limit_refill_per_minute / 60,
     )
     app.state.tracer = Tracer(db_path=settings.trace_db_path)
+    app.state.budget_tracker = BudgetTracker(
+        db_path=settings.budget_db_path, max_cost_usd_per_user=settings.budget_max_cost_usd_per_user
+    )
+    app.state.bad_case_store = BadCaseStore(db_path=settings.bad_case_db_path)
 
     async with sqlite_checkpointer(settings.checkpoint_db_path) as checkpointer:
         app.state.graph = build_default_agent_graph(gateway, checkpointer, tracer=app.state.tracer)

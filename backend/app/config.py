@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     checkpoint_db_path: str = "./data/checkpoints.sqlite3"
     idempotency_db_path: str = "./data/idempotency.sqlite3"
     trace_db_path: str = "./data/trace.sqlite3"
+    budget_db_path: str = "./data/budget.sqlite3"
+    bad_case_db_path: str = "./data/bad_cases.sqlite3"
+
+    # 每个用户累计花费超过这个数（美元）就拒绝继续调用模型，防止失控消耗。
+    # 价格表是近似值，不是阿里云的实时计费 API，用来做数量级预算控制。
+    budget_max_cost_usd_per_user: float = 1.0
 
     cors_allowed_origins: str = "http://localhost:5173"
 

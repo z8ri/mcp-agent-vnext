@@ -33,6 +33,8 @@ async def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite3"))
     monkeypatch.setenv("IDEMPOTENCY_DB_PATH", str(tmp_path / "idempotency.sqlite3"))
     monkeypatch.setenv("TRACE_DB_PATH", str(tmp_path / "trace.sqlite3"))
+    monkeypatch.setenv("BUDGET_DB_PATH", str(tmp_path / "budget.sqlite3"))
+    monkeypatch.setenv("BAD_CASE_DB_PATH", str(tmp_path / "bad_cases.sqlite3"))
     monkeypatch.setenv("WRITE_WORKSPACE_DIR", str(tmp_path / "workspace"))
     monkeypatch.setenv("MOCK_MODE", "true")
 

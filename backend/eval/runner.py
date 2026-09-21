@@ -23,6 +23,7 @@ from langgraph.types import Command
 from app.agent.checkpointer import sqlite_checkpointer
 from app.agent.graph import build_graph
 from app.agent.mock_model import MockAgentModel
+from app.badcases.store import BadCaseStore
 from app.mcp_gateway.client import GatewayClient
 from app.mcp_gateway.idempotency import IdempotencyStore
 from app.mcp_gateway.registry import ServerRegistry
@@ -114,10 +115,24 @@ async def run_case(case: EvalCase) -> EvalResult:
     return EvalResult(case=case, passed=not failures, failures=failures, duration_ms=duration_ms, spans=spans)
 
 
-async def run_all(cases: list[EvalCase] | None = None) -> list[EvalResult]:
+async def run_all(
+    cases: list[EvalCase] | None = None, *, bad_case_store: BadCaseStore | None = None
+) -> list[EvalResult]:
+    """`bad_case_store` 默认用真实 app 那份（`settings.bad_case_db_path`）——这样
+    `python -m eval.runner` 跑失败的场景，和生产 `/chat` 里的真实失败，最终都
+    汇总到同一张表、同一个 `GET /bad-cases` 能查到，不是两套互不相干的记录。
+    """
+    store = bad_case_store or BadCaseStore()
     results = []
     for case in cases if cases is not None else CASES:
-        results.append(await run_case(case))
+        result = await run_case(case)
+        if not result.passed:
+            await store.record(
+                source="eval",
+                context=result.case.name,
+                error_message="; ".join(result.failures),
+            )
+        results.append(result)
     return results
 
 

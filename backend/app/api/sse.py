@@ -11,18 +11,22 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from typing import Any, Awaitable, Callable, AsyncIterator
 
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.mcp_gateway.contracts import ErrorCode
+
+OnError = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def format_sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def stream_graph_turn(graph, run_input, config: dict) -> AsyncIterator[str]:
+async def stream_graph_turn(
+    graph, run_input, config: dict, *, on_error: OnError | None = None
+) -> AsyncIterator[str]:
     try:
         async for chunk in graph.astream(run_input, config, stream_mode="updates"):
             if "__interrupt__" in chunk:
@@ -53,7 +57,9 @@ async def stream_graph_turn(graph, run_input, config: dict) -> AsyncIterator[str
                         )
         yield format_sse("final", {})
     except Exception as exc:  # noqa: BLE001 - 流已经开始返回给前端，任何异常都要转成一个 error 事件收尾
-        yield format_sse(
-            "error",
-            {"code": ErrorCode.UNKNOWN.value, "message": str(exc), "retryable": False},
-        )
+        error_payload = {"code": ErrorCode.UNKNOWN.value, "message": str(exc), "retryable": False}
+        if on_error is not None:
+            # Bad Case 收集（候选架构横切能力里的一项）：真实生产里出现的失败
+            # 在这里被记下来，不是只有 eval 里预先写好的 5 个场景才算"案例"。
+            await on_error(error_payload)
+        yield format_sse("error", error_payload)

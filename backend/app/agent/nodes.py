@@ -33,6 +33,17 @@ def _thread_id(config: RunnableConfig) -> str:
     return config["configurable"]["thread_id"]
 
 
+def _record_token_usage(attrs: dict[str, Any], response: AIMessage) -> None:
+    # `ChatTongyi` 不走 LangChain 标准的 `usage_metadata` 字段（实测是 None），
+    # token 用量在 `response_metadata["token_usage"]` 里——这是真的调真实通义
+    # 千问核实过的，不是照着文档猜的字段名。别的模型/mock 模型没有这个字段时
+    # 就不记，budget 那边会把它当成 0 token 处理，不是当成报错。
+    usage = response.response_metadata.get("token_usage") if response.response_metadata else None
+    if usage:
+        attrs["input_tokens"] = usage.get("input_tokens", 0)
+        attrs["output_tokens"] = usage.get("output_tokens", 0)
+
+
 def _record_result(attrs: dict[str, Any], result) -> None:
     # 只记 ok/error code，不把工具的 args/content 写进 trace——那可能是用户输入的原文。
     attrs["ok"] = result.ok
@@ -55,8 +66,9 @@ def make_agent_node(model_with_tools: Runnable, tracer: Tracer | None = None):
         if tracer is None:
             response = await model_with_tools.ainvoke(messages)
         else:
-            async with tracer.span(_thread_id(config), "agent.invoke", message_count=len(messages)):
+            async with tracer.span(_thread_id(config), "agent.invoke", message_count=len(messages)) as attrs:
                 response = await model_with_tools.ainvoke(messages)
+                _record_token_usage(attrs, response)
 
         assert isinstance(response, AIMessage)
 

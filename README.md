@@ -13,6 +13,8 @@
 - 自建免 Key 地图 MCP Server（基于 OpenStreetMap Nominatim），替换参考代码中的占位符地图配置
 - 结构化 Trace：每次模型调用、每次工具调用都落一条 span（耗时、成功/失败），`GET /conversations/{id}/trace` 能按时间顺序查一次对话的完整轨迹
 - Eval 回归套件（`backend/eval/`）：5 个脚本化场景（天气成功、写文件确认执行、写文件拒绝不执行、无关消息不触发工具、单 server 故障不影响其它工具），`MOCK_MODE` 下不需要任何 Key 就能跑，`python -m eval.runner` 单独跑出报告，也接进了 `pytest`
+- 成本预算：按用户累计通义千问 token 花费，超预算 `/chat` 会用 402 拦住，不等花超了才后悔；`GET /budget` 查当前用量
+- Bad Case 收集：eval 跑失败的场景、`/chat` 里真实出现的 error，都汇总进同一张表，`GET /bad-cases` 能查——不是只有预先写好的几个场景才算"案例"
 
 ## 目录结构
 
@@ -83,6 +85,13 @@ curl -N -X POST localhost:8000/chat \
 
 ```bash
 curl -s localhost:8000/conversations/$CONV_ID/trace -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+### 查预算用量 / Bad Case
+
+```bash
+curl -s localhost:8000/budget -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+curl -s localhost:8000/bad-cases -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ```
 
 ### 跑 Eval 回归套件

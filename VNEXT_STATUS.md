@@ -4,9 +4,9 @@
 
 最后更新：2026-09-20
 
-**总览**：下表 21 行全部"已实现"（代码 + 真实测试/手工验证都有）。原来剩的两项"进行中"（`query_weather` 的重试/缓存、限流+日志脱敏的专项测试）用户直接问了"为什么不去做"——确认之后发现两项都不需要真实 Key（respx mock HTTP 响应即可、限流和日志脱敏本来就不依赖外部服务），只是之前没有回头补，这一轮补上了。仍然值得继续做的事在下面"下一步"里。
+**总览**：下表 23 行全部"已实现"（代码 + 真实测试/手工验证都有）。原来剩的两项"进行中"（`query_weather` 的重试/缓存、限流+日志脱敏的专项测试）用户直接问了"为什么不去做"——确认之后发现两项都不需要真实 Key（respx mock HTTP 响应即可、限流和日志脱敏本来就不依赖外部服务），只是之前没有回头补，补上了。之后用户又问"是不是完美达到了 vNext 的 spec"，逼着重新核对了一遍最初的候选架构文本，发现候选架构"横切能力"里明确列出的**成本与延迟预算**和 **Bad Case 收集**两项，之前整个实现过程里完全没做、也没有在这份文档里追踪过——不是"进行中"被漏标，是彻底漏掉了。这一轮把这两项也补上了，细节见下表最后两行。仍然值得继续做的事在下面"下一步"里；这份文档本身就是"曾经漏掉过东西、发现了就诚实补上"的例子，不是一次性写对的。
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（55 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（68 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -31,6 +31,8 @@
 | Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 已实现 | `frontend/src/` | 用内置浏览器手工走了一遍完整流程：注册→建会话→问天气（看到 tool_call/tool_result、不需要确认）→要求写笔记（看到确认卡→批准→看到执行成功，磁盘上真的多了文件）→再写一次→拒绝（看到"用户拒绝执行该操作"，磁盘上没有多文件）→同一会话里多轮历史正确保留。`thread_id` 全程前端拿不到，只有 `conversation_id`。类型检查（`vue-tsc -b`）和生产构建（`vite build`）都过 |
 | Playwright E2E | §12.9 | 已实现 | `frontend/e2e/chat.spec.ts` | 4 个用例真实跑通（装了 Chromium）：天气问答不触发确认、写文件确认后真执行、拒绝后不执行、密码错误显示不可重试的错误提示。Playwright 只管前端 dev server，后端需要单独起好（`frontend/e2e/README.md` 里写了原因和步骤）——没有为了"一键跑"把机器专属的 conda 路径硬编码进配置文件 |
 | Docker Compose 本地部署 | §11 | 已实现 | `ops/docker-compose.yml`, `backend/Dockerfile`, `mcp_servers/Dockerfile`, `frontend/Dockerfile` | `docker compose up -d --build` 真实跑通，三个容器按 `depends_on`+healthcheck 顺序起来（`map-mcp` healthy → `backend` healthy → `frontend`）；容器化的后端跑通了注册→登录→建会话→聊天→工具调用全流程，浏览器打开 `localhost:5173` 真实连上了容器化后端并拿到之前 curl 建的会话。这台机器一开始没装 Docker、装完后引擎起不来，排查过程和修复见下面"真问题"部分 |
+| 成本与延迟预算 | §11 横切能力 | 已实现 | `backend/app/budget/tracker.py`, `GET /budget` | 之前完全漏掉、这轮才补上的一项。按用户累计通义千问 token 花费（`ChatTongyi` 的用量在 `response_metadata["token_usage"]` 里，不是 LangChain 标准的 `usage_metadata` 字段——这是真的调真实 Qwen 核实过的，不是照文档猜的），价格表是近似值不是实时计费 API；累计花费超过预算，`/chat` 会在真正调模型之前用 402 拦住，不是打完钱才后悔。`backend/tests/test_budget.py`（6 用例）+ `test_budget_and_bad_cases_integration.py` 部分用例 pytest 跑绿：新用户零花费、多轮累加、按用户隔离、超预算真实触发 402；另外真起服务器验证过一轮正常对话后 `/budget` 显示的数字符合预期。延迟目前只记录（每个 `agent.invoke` span 的 `duration_ms` 累加），没有做"超过延迟预算就报警/降级"这一半 |
+| Bad Case 收集 | §11 横切能力 | 已实现 | `backend/app/badcases/store.py`, `GET /bad-cases` | 之前也是完全漏掉的一项。两个来源写进同一张表：`eval/runner.py` 跑失败的场景、`/chat` 真实出现的 `error` 事件（通过 `stream_graph_turn` 新增的 `on_error` 回调）。`backend/tests/test_bad_cases.py`（3 用例）+ 集成测试 pytest 跑绿；另外做了端到端的真实验证：起一个真实服务器、故意跑一个断言写错的 eval 场景（独立的 Python 进程），再用 curl 查服务器的 `GET /bad-cases`，确认真的能看到那条失败记录——证明 eval 和生产用的是同一份持久化数据，不是各测各的。范围边界：没有做角色/权限系统，现在任何登录用户都能看 `/bad-cases`，生产上应该收窄成运维角色，如实记在这里 |
 
 ## 说明
 
@@ -49,6 +51,8 @@
 5. **前端会话历史回放**：加一个 `GET /conversations/{id}/messages`（从 LangGraph checkpoint 读历史），切换/重新打开会话时前端拉一次渲染，补上 VNEXT_STATUS 里记的那个已知缺口。
 6. **故障注入测试**：真的把一个 MCP server 进程杀掉/让它超时，验证熔断器状态转移和重试退避在真实故障下的行为，而不是只靠单元测试里模拟的失败结果。
 7. **多 worker 部署**：如果真要多进程部署，`SessionManager` 的 `asyncio.Lock` 需要换成数据库行锁或 Redis 分布式锁——现在明确标了这个边界，不是文档遗漏。
+8. **延迟预算的"报警/降级"那一半**：现在 `BudgetTracker` 只记录延迟、不对延迟做预算判断（只有成本会真的拦请求）；可以加一个"单轮延迟超过 N 秒就标记/警告"的逻辑，对应候选架构里"成本**与延迟**预算"这半句现在只做了一半。
+9. **`/bad-cases` 和 `/budget` 需要角色/权限收窄**：现在是任何登录用户都能看，没有区分普通用户和运维/管理员——这两个接口本质是运营视角的数据，不应该对所有用户开放，项目目前没有角色系统，属于已知但没做的部分。
 
 ## 开发过程中发现的真问题（面试可以直接讲的坑）
 
@@ -64,3 +68,6 @@
 - **`Settings` 的 `.env` 路径是相对当前工作目录算的，`cd backend && uvicorn ...` 和在仓库根目录起是两个不同的 cwd**：第一次拿到真实 `DASHSCOPE_API_KEY` 联调时，`.env` 里明明写了 `MOCK_MODE=false`，但 `/chat` 还是返回 mock 模式的回复——因为 `pydantic-settings` 的 `env_file=".env"` 是相对路径，从 `backend/` 目录起服务时它去 `backend/.env` 找，找不到就静默退回默认值（`mock_mode: bool = True`），不报错也不提示。修复：`config.py` 把 `env_file` 锚定成 `Path(__file__).resolve().parents[2] / ".env"`，不再依赖启动时的 cwd。Docker 里不受影响，因为容器内环境变量是 `docker-compose.yml` 的 `env_file:`/`environment:` 直接注入的真实 OS 环境变量，优先级本来就高于任何 `.env` 文件。
 - **真实调用通义千问 API 第一次卡在账号欠费，不是代码问题**：配置修好、真 key 填好之后，第一次 `/chat` 请求返回的是通义千问 API 的 `400 Arrearage` 错误（阿里云账号欠费，被拒绝访问）。这个错误从 DashScope 一路被网关捕获、转成结构化 `error` SSE 事件、正确推给客户端，程序没有崩溃——等于顺带验证了一次真实的错误处理链路（此前这条路径只在 mock 模式下测过）。
 - **百炼目录里的新版本号模型名，`ChatTongyi` 不认**：账号欠费解决后，用账号免费额度页面显示的 `qwen3.8-flash` 当模型名，第一次真实推理请求直接报 `400 InvalidParameter: url error, please check url！`。换成经典的 `qwen-plus`（参考代码原本用的那个名字）就正常了——`langchain_community.chat_models.ChatTongyi` 走的是 DashScope 经典 `Generation` 接口，认的是 `qwen-turbo`/`qwen-plus`/`qwen-max` 这一族老式命名，账号新版"百炼"控制台里列出来的那些版本号式命名（`qwen3.8-flash`、`qwen3.8-max-0902` 这种）看起来是给别的（可能是 OpenAI 兼容模式）接口用的，不能直接套给经典接口。`.env.example` 和 `config.py` 里的默认值就是 `qwen-plus`，本身没写错，只是第一次按着控制台免费额度页面上看到的名字去填反而填错了。
+- **对着最初的候选架构文本重新核对了一遍，发现"成本与延迟预算"和"Bad Case 收集"两项完全没做**：不是代码漏了几行，是从头到尾都没实现过，`VNEXT_STATUS.md` 里之前甚至都没有对应的行去追踪。原因是候选架构原文那段"横切能力"列了很多项（数据库 Checkpointer、并发控制、幂等键、HITL、Trace/Eval/Bad Case、密钥与日志脱敏、成本与延迟预算、健康检查……），实现过程里逐项对照的时候把这两项漏看了，后面每轮更新 `VNEXT_STATUS.md` 也没人回头去跟原文再核对一遍，缺口就一直没暴露。这次是用户直接问"是不是完美达到了 spec"，倒逼着重新逐字核对原文才发现的——说明"自己维护的进度追踪表"本身也可能是不准的，得偶尔跟最初的需求文本重新核对，不能只信自己写的状态表。
+- **`budget/tracker.py` 的 schema 建表语句踩了和 `idempotency.py`/`tracer.py` 一开始类似的坑**：schema 里有 `CREATE TABLE` 和 `CREATE INDEX` 两条语句，但用的是只能执行单条语句的 `conn.execute(_SCHEMA)`，一跑测试直接报 `sqlite3.ProgrammingError: You can only execute one statement at a time`。改成 `conn.executescript(_SCHEMA)`（跟 `tracer.py` 里一致的写法）就好了——这类 bug 每次都是新模块照着旧模块"抄"的时候，抄的是单表 schema 那个（比如 `idempotency.py`，只有一条 `CREATE TABLE`，`execute()` 刚好能跑），没意识到自己这次多加了一条索引语句，两种 schema 复杂度不一样，不能照抄同一个执行方式。
+- **新加两个数据库配置项，只在新测试文件里做了隔离，忘了同步到已有的测试文件**：`main.py` 的 lifespan 新增了 `BudgetTracker`/`BadCaseStore`，都是用 `settings.budget_db_path`/`settings.bad_case_db_path`（默认相对路径 `./data/...`）。写新测试（`test_budget_and_bad_cases_integration.py`）的时候记得把 `BUDGET_DB_PATH`/`BAD_CASE_DB_PATH` 隔离到 `tmp_path`，但 `test_app_integration.py`、`test_rate_limit.py`、`test_request_logging_redaction.py` 这三个本来就存在、也会走 `create_app()` 完整生命周期的测试文件没有同步更新——结果每次跑完整套 `pytest`，这三个文件的用例都会在仓库根目录悄悄建出真实的 `data/budget.sqlite3`、`data/bad_cases.sqlite3`，污染工作区（`git status` 能看到，但很容易被忽略过去）。修复：把这两行 `monkeypatch.setenv` 同步加到所有四个用 `create_app()` 的测试 fixture 里。教训：给共享的应用状态加新的持久化资源时，"隔离测试环境"这件事要对所有用到完整 app 生命周期的测试文件做一遍检查，不能只改自己当次新写的那一个文件。
