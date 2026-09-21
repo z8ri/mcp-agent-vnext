@@ -1,6 +1,6 @@
 """手写的 LangGraph 状态图。
 
-条件边（对应档案 §9 偏差 1 要求的"手工定义……条件边"）：
+条件边（手工定义，不依赖预构建 Agent 的隐式路由）：
 
     START -> agent
     agent -> tools    （本轮模型产生了 tool_call）

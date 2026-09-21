@@ -1,7 +1,7 @@
 """三个 MCP Server 共用的最小工具函数。
 
-保持这几个 Server 是可以独立运行的普通脚本（不依赖 backend/app 包），
-和参考代码的定位一致：Server 只管协议契约和领域执行，不掺进业务框架代码。
+保持这几个 Server 是可以独立运行的普通脚本（不依赖 backend/app 包）：
+Server 只管协议契约和领域执行，不掺进业务框架代码。
 """
 
 from __future__ import annotations

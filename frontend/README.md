@@ -1,7 +1,6 @@
-# MCP Agent vNext — 前端
+# MCP Multi-Tool Agent — 前端
 
-Vue 3 + TypeScript + Vite，独立重写自机构参考代码的 `ChatBox.vue`（单文件、不发
-`thread_id`、没有语法高亮/分级错误/重试按钮）。
+Vue 3 + TypeScript + Vite：`thread_id` 全程只存在于服务端，前端只带 `conversation_id`；聊天流用 `fetch` + `ReadableStream` 消费 SSE（不是原生 `EventSource`，因为要带自定义鉴权 header）；支持语法高亮、分级错误 + 重试按钮、HITL 确认卡。
 
 ## 目录
 

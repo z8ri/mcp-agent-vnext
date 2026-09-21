@@ -6,14 +6,14 @@ import json from 'highlight.js/lib/languages/json'
 import bash from 'highlight.js/lib/languages/bash'
 
 // 只注册用得到的几种语言，不拉全量 highlight.js 语言包——
-// 修的是参考代码"无语法高亮器"这个具体缺口，不是要做一个通用代码渲染器。
+// 这里要的是聊天里代码块的语法高亮，不是一个通用代码渲染器。
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('json', json)
 hljs.registerLanguage('bash', bash)
 
 const md = new MarkdownIt({
-  html: false, // 和参考代码一样禁用原始 HTML，防止 XSS
+  html: false, // 禁用原始 HTML，防止 XSS
   linkify: true,
   breaks: true,
   highlight(code: string, lang: string): string {

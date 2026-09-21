@@ -33,7 +33,7 @@ async function submit() {
 <template>
   <div class="login-page">
     <form class="login-card" @submit.prevent="submit">
-      <h1>MCP Agent vNext</h1>
+      <h1>MCP Multi-Tool Agent</h1>
       <p class="login-card__subtitle">{{ mode === 'login' ? '登录' : '注册一个新账号' }}</p>
 
       <label>

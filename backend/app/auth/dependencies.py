@@ -1,6 +1,6 @@
 """FastAPI 依赖：从请求里拿到当前登录用户。
 
-`session_factory` 挂在 `app.state` 上，由 Stage E 的应用启动逻辑注入
+`session_factory` 挂在 `app.state` 上，由应用启动逻辑（`main.py` 的 lifespan）注入
 （不在这里直接 import FastAPI app，避免循环依赖）。
 """
 

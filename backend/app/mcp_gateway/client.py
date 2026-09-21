@@ -1,6 +1,6 @@
 """网关调用层：给一次工具调用套上超时 / 重试 / 熔断 / 幂等 / 结构化错误。
 
-Agent 节点（Stage C）不直接摸 `MultiServerMCPClient`，只通过这里的
+Agent 节点不直接摸 `MultiServerMCPClient`，只通过这里的
 `GatewayClient.call()`，这样"哪个工具可以自动重试""写操作要不要幂等键"这些
 策略都集中在网关，不会散落在 Agent 图的节点代码里。
 """

@@ -1,8 +1,7 @@
 """每个 MCP Server 的独立健康状态。
 
-对应档案 §10.2："任一 MCP 连接异常会被整体捕获并令工具列表变成空列表，
-没有 per-server readiness、局部降级和明确健康状态"。这里维护每个 server
-独立的 healthy/unhealthy 状态，一个挂了不影响其它 server 的工具继续可用。
+维护每个 server 独立的 healthy/unhealthy 状态（per-server readiness），
+一个挂了不影响其它 server 的工具继续可用，也不会把整个工具列表清空。
 """
 
 from __future__ import annotations

@@ -1,6 +1,5 @@
-"""Write MCP Server（vNext 重写版）。
+"""Write MCP Server。
 
-相对参考代码的 `write_server.py` 修的具体问题（对应求职档案 §7、§12.8）：
 - 接收调用方传入的相对 `path`，做路径穿越校验，写入范围锁定在工作区目录内；
 - 文件名不再只精确到秒——没传 `path` 时用内容哈希 + 短 uuid 生成，避免同秒并发覆盖；
 - 默认不覆盖已存在文件（`overwrite=False`），已存在就返回 `skipped_existing`，
@@ -8,7 +7,7 @@
 - 进程内用 per-path 锁串行化并发写同一文件，跨进程/跨副本的并发仍需要外部协调，
   这里不假装解决了那一层。
 
-是否真的执行写入由上层网关的 HITL 确认门控（Stage C 的 confirm 节点），
+是否真的执行写入由上层网关的 HITL 确认门控（Agent 图的 confirm 节点），
 这个 Server 本身不做用户确认弹窗——Server 只管契约和领域执行。
 """
 

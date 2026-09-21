@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test'
  * 提前在另一个终端起好，见 frontend/e2e/README.md。
  * 原因：后端要跑在装了 Python 3.11+ 依赖的环境里，写死一条激活 conda 环境的命令
  * 到这份配置里对换一台机器跑就是错的——不如让后端启动方式保持和平时开发、
- * 以及后面 Stage H 的 docker-compose 编排一致，Playwright 只管它自己那一半。
+ * 以及 docker-compose 编排一致，Playwright 只管它自己那一半。
  */
 export default defineConfig({
   testDir: './e2e',

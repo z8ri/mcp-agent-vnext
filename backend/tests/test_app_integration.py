@@ -2,8 +2,8 @@
 
 跑的是真实的 `create_app()`（含 lifespan：真实起 weather/write MCP 子进程、
 真实建数据库、真实建 Agent 图），只是 `MOCK_MODE=true` 用假模型代替真实 Qwen，
-所以不需要任何 API Key。这条测试直接验证了档案 §11 候选架构图从
-"Vue Client" 到 "MCP Tool Gateway" 的整条链路真的能跑通一个 HTTP 请求。
+所以不需要任何 API Key。这条测试直接验证了从前端到 MCP Tool Gateway 的
+整条链路真的能跑通一个 HTTP 请求。
 """
 
 from __future__ import annotations

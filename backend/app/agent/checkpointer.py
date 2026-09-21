@@ -1,7 +1,7 @@
-"""SQLite Checkpointer，替换参考代码里进程内的 `InMemorySaver`。
+"""SQLite Checkpointer，替换进程内的 `InMemorySaver`。
 
-对应档案 §10.1："InMemorySaver 只适用于单进程内；重启丢失"。`interrupt()`
-做的 HITL 确认暂停也依赖 checkpointer 才能跨请求恢复执行。
+`InMemorySaver` 只在单进程内有效，进程一重启，所有暂停中的对话状态就没了。
+`interrupt()` 做的 HITL 确认暂停依赖 checkpointer 才能跨请求、跨进程重启恢复执行。
 """
 
 from __future__ import annotations

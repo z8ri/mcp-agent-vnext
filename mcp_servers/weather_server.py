@@ -1,6 +1,5 @@
-"""Weather MCP Server（vNext 重写版）。
+"""Weather MCP Server。
 
-相对参考代码的 `weather_server.py` 修的具体问题：
 - 网络类失败（超时、5xx、连接错误）自动重试 2 次，4xx（比如城市名拼错）不重试；
 - 同一个城市 5 分钟内的重复查询走内存缓存，不重复打 OpenWeather；
 - 出错时返回结构化 {ok, error{code,message,retryable}}，不是裸字符串糊给模型。
@@ -22,7 +21,7 @@ mcp = FastMCP("WeatherServer")
 
 OPENWEATHER_API_BASE = "https://api.openweathermap.org/data/2.5/weather"
 API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
-USER_AGENT = "mcp-agent-vnext-weather/1.0"
+USER_AGENT = "mcp-multi-tool-agent-weather/1.0"
 REQUEST_TIMEOUT_S = 30.0
 MAX_ATTEMPTS = 3
 

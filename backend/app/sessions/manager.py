@@ -1,13 +1,12 @@
 """user -> conversation -> LangGraph thread_id，以及同一个 thread 的并发串行化。
 
-直接对应求职档案 §10.1 点名的问题："`thread_id` 默认值为 '1'，且可由未认证
-客户端任意指定，不能充当用户隔离边界"、"同一 thread 没有串行队列"。这里：
+`thread_id` 不能是一个客户端可以随便指定的值——那样就不构成用户隔离边界。这里：
 - conversation 的归属在数据库里，`get_owned_conversation` 强制校验 user_id；
 - 同一个 thread_id 的请求必须拿到同一把 `asyncio.Lock` 才能进 Agent 图，
   避免两个并发请求同时读写同一个 LangGraph checkpoint。
 
 多 worker/多副本场景下 `asyncio.Lock` 只能锁住单进程内的并发，这一点
-在 VNEXT_STATUS.md 里如实写清楚，不夸大成"分布式锁"。
+在 `docs/ENGINEERING_NOTES.md` 里如实写清楚，不夸大成"分布式锁"。
 """
 
 from __future__ import annotations

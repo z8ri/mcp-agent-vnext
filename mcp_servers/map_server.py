@@ -1,18 +1,11 @@
-"""Map MCP Server（新增，替换参考代码里的占位符地图配置）。
+"""Map MCP Server。
 
-参考代码的 `servers_config.json` 里地图那一项是一个中文占位字符串 URL，
-档案原话："URL 是占位符，无 Server 代码、可用连接、工具列表或地图 trace"。
-
-这里用 OpenStreetMap 的 Nominatim 公共 API 实现一个真正能跑、不需要 Key 的
-地理编码 / 逆地理编码 Server，通过 Streamable HTTP 暴露（对应候选架构里
-"新的远程服务默认使用当前规范的 Streamable HTTP"）。README 里写了怎么换成
-高德官方 MCP（需要用户自己申请 Key）。
+用 OpenStreetMap 的 Nominatim 公共 API 实现一个真正能跑、不需要 Key 的
+地理编码 / 逆地理编码 Server，通过 Streamable HTTP 暴露。README 里写了
+怎么换成高德官方 MCP（需要用户自己申请 Key）。
 
 Nominatim 的使用政策要求：合理的 User-Agent、不超过约 1 请求/秒，这里用一个
 模块级的节流锁保证这一点。
-
-注意：本仓库尚未安装 `mcp` 依赖跑通验证，`mcp.run(transport="streamable-http")`
-的具体参数需要在装好依赖后对照实际版本确认，README 会记录验证结果。
 """
 
 from __future__ import annotations
@@ -28,7 +21,7 @@ from common import err, ok
 
 MIN_INTERVAL_S = 1.1  # 略大于 Nominatim 要求的 1 req/s，留点余量
 NOMINATIM_BASE = "https://nominatim.openstreetmap.org"
-USER_AGENT = "mcp-agent-vnext-map/1.0 (personal coursework project)"
+USER_AGENT = "mcp-multi-tool-agent-map/1.0"
 REQUEST_TIMEOUT_S = 10.0
 
 _rate_lock = asyncio.Lock()

@@ -1,7 +1,6 @@
 """对话相关接口：创建/列出 conversation，SSE 聊天。
 
-`thread_id` 从来不由前端传（对应档案里"前端不发 thread_id、后端默认 '1'"这个
-具体缺陷）——前端只知道 `conversation_id`，`thread_id` 是服务端在
+`thread_id` 从来不由前端传——前端只知道 `conversation_id`，`thread_id` 是服务端在
 `Conversation` 表里生成并维护的内部细节，前端永远看不到、也改不了它。
 """
 
@@ -195,7 +194,7 @@ async def get_budget_status(request: Request, user: User = Depends(get_current_u
 @router.get("/bad-cases")
 async def list_bad_cases(request: Request, user: User = Depends(get_current_user)) -> list[dict]:
     # 没有做角色/权限系统，这里先对所有登录用户开放——生产上应该收窄成运维/
-    # 管理员角色，这一点如实记在 VNEXT_STATUS.md，不假装已经做了权限控制。
+    # 管理员角色，这一点如实记在 docs/ENGINEERING_NOTES.md，不假装已经做了权限控制。
     cases = await _bad_case_store(request).list_unresolved()
     return [c.__dict__ for c in cases]
 

@@ -1,7 +1,7 @@
 """按 MCP Server 维度的简单熔断器。
 
-对应档案里"任一 MCP 连接异常会被整体捕获并令工具列表变成空列表"的问题：
-熔断只针对单个 server 生效，其余 server 的工具应该继续可用。
+熔断只针对单个 server 生效——一个 MCP 连接异常不该把所有 server 的
+工具都拖下水，其余 server 的工具应该继续可用。
 """
 
 from __future__ import annotations

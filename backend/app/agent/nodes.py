@@ -1,13 +1,13 @@
 """四个手写节点：agent / tools / confirm / finalize。
 
-职责边界（对应求职档案 §6 要求分清的四层）：
+职责边界（刻意分清这四层，不糊在一起）：
 - `agent_node`：Qwen 决定要不要调用工具、调用哪个——纯模型推理。
 - `tools_node`：LangGraph 循环控制的一部分，逐个把 tool_call 交给网关；
   网关（MCP Client 协议层）决定要不要真的转发给 MCP Server 执行。
 - `confirm_node`：HITL 门控，真正暂停图的执行等人确认，不是网关内部状态。
 - `finalize_node`：收尾。
 
-Trace（Stage F）只包在真正执行一次的工作上——`model.ainvoke()`、
+Trace 只包在真正执行一次的工作上——`model.ainvoke()`、
 `gateway.call()`——不包 `interrupt()` 本身：`interrupt()` 暂停时会向上抛
 `GraphInterrupt`，而且恢复执行时整个节点函数会从头重新跑一遍；把这段也包进
 span 会导致"暂停"被错误记成一次 error，恢复时又会多记一条重复 span。
@@ -174,5 +174,5 @@ def route_after_confirm(state: AgentState) -> str:
 
 
 async def finalize_node(state: AgentState) -> dict:
-    # Stage F 会在这里挂载 Trace span 收尾；现在先保持空操作。
+    # 目前是空操作；如果之后要给"整轮对话"本身加一个收尾 span，挂在这里。
     return {}

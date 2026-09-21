@@ -1,9 +1,9 @@
 """脚本化的 Eval 场景。
 
-对应求职档案 §12"待运行验证清单"里能在没有真实 API Key 时就跑的那几条：
-天气工具成功、写文件走 HITL 确认（批准/拒绝两条分支）、无关消息不触发工具、
-单个 MCP Server 故障不拖垮其它工具。全部用 `MockAgentModel`（关键词触发）
-驱动真实的 MCP Gateway/Server，不是纯 mock 断言。
+覆盖不需要真实 API Key 就能跑的几条核心路径：天气工具成功、写文件走
+HITL 确认（批准/拒绝两条分支）、无关消息不触发工具、单个 MCP Server
+故障不拖垮其它工具。全部用 `MockAgentModel`（关键词触发）驱动真实的
+MCP Gateway/Server，不是纯 mock 断言。
 """
 
 from __future__ import annotations

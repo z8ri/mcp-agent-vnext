@@ -1,9 +1,9 @@
 """验证 `get_current_user` 依赖链真的能在一个跑起来的 FastAPI 应用里工作。
 
-这里搭的是一个最小化的测试专用 app（不是 Stage E 的正式 app），只是为了在
-写正式路由之前，先证明 `request.app.state.session_factory` 这套注入方式、
+这里搭的是一个最小化的测试专用 app（不是 `main.py` 里的正式 app），只是为了
+独立证明 `request.app.state.session_factory` 这套注入方式、
 `OAuth2PasswordBearer` 取 token、`get_current_user` 校验 token 这条链路
-本身是通的——避免 Stage E 搭好路由以后才发现依赖注入哪里接不上。
+本身是通的——避免正式路由搭好以后才发现依赖注入哪里接不上。
 """
 
 from __future__ import annotations

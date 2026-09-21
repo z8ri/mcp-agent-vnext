@@ -2,8 +2,8 @@
 
 按关键词决定要不要调用工具，纯粹是为了在没有真实 Key 的时候验证
 "Vue -> FastAPI -> Agent 图 -> MCP Gateway -> MCP Server" 这条链路是通的，
-不代表真实的模型推理能力——这一点在 VNEXT_STATUS.md 和 README 里都要说清楚，
-不能让人误以为这是个真正智能的对话模型。
+不代表真实的模型推理能力——这一点在 README 里说清楚，不能让人误以为
+这是个真正智能的对话模型。
 """
 
 from __future__ import annotations

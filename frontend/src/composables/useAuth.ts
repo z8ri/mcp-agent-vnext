@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import * as authApi from '../api/auth'
 
-const STORAGE_KEY = 'mcp-agent-vnext.token'
+const STORAGE_KEY = 'mcp-multi-tool-agent.token'
 
 const token = ref<string | null>(localStorage.getItem(STORAGE_KEY))
 

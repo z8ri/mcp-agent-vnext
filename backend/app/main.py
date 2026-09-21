@@ -1,7 +1,7 @@
 """应用组装：把 Gateway、Agent 图、鉴权、SessionManager、限流都接到一起。
 
-对应档案第 11 节候选架构图里从 Vue Client 到 MCP Tool Gateway 的整条链路，
-现在是真的能起一个进程、真的能处理 HTTP 请求，不是纸面设计。
+从 Vue 前端到 MCP Tool Gateway 的整条链路在这里真的拼成一个进程，
+能处理真实 HTTP 请求，不是纸面设计。
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="MCP Agent vNext", lifespan=lifespan)
+    app = FastAPI(title="MCP Multi-Tool Agent", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,

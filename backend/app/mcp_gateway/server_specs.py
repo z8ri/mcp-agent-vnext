@@ -1,8 +1,8 @@
 """MCP Server 的声明式配置：连接方式 + 网关侧元数据。
 
-机构参考代码的 `servers_config.json` 只描述怎么连接（command/url），
-不知道哪个工具有副作用、要不要重试、超时多久。这里把两件事合在一起，
-Registry 用它来发现+校验工具，GatewayClient 用它来决定重试/熔断/幂等策略。
+只描述"怎么连接"（command/url）是不够的——网关还得知道哪个工具有副作用、
+要不要重试、超时多久。这里把两件事合在一起，Registry 用它来发现+校验工具，
+GatewayClient 用它来决定重试/熔断/幂等策略。
 """
 
 from __future__ import annotations

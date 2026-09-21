@@ -3,9 +3,6 @@
 用 `FakeMessagesListChatModel` 脚本化模型的回复（不需要 DASHSCOPE_API_KEY），
 但网关和 MCP Server 是真实的——真的启动 weather/write 子进程、真的写文件、
 真的通过 `interrupt()`/`Command` 走一次完整的 HITL 暂停/恢复。
-
-这两个用例直接对应求职档案 §9 偏差 1（手写节点/条件边 vs 预构建 Agent）和
-§12.5/§12.8（多步骤 Trace、写文件确认与幂等）的验证要求。
 """
 
 from __future__ import annotations

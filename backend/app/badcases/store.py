@@ -1,5 +1,5 @@
-"""Bad Case 收集：候选架构横切能力里"Trace / Eval / Bad Case"的最后一项，
-早先只做了 Trace 和 Eval，这个漏掉了。
+"""Bad Case 收集：Trace/Eval 只覆盖了"跑过的场景"，这里补上"生产里真的
+出过问题"的那一部分。
 
 两个来源都写进同一张表：
 1. `backend/eval/runner.py` 里失败的场景（脚本化回归，可控、可重现）；

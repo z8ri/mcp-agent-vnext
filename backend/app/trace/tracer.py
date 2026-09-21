@@ -1,13 +1,12 @@
 """结构化 Trace：每个 Agent 步骤/工具调用落一条 span。
 
-对应档案 §10.4/§11 指出的"无正式 Eval 数据集、trace、任务成功率、延迟……"。
 span 用 `thread_id` 串起来，`GET /conversations/{id}/trace` 能按时间顺序拉出
-一次对话里"模型想了多久、调了哪个工具、工具花了多久、成功还是失败"，
-这是面试时能具体指给别人看的东西，不是只在嘴上说"我们做了可观测性"。
+一次对话里"模型想了多久、调了哪个工具、工具花了多久、成功还是失败"，是可以
+实际打开看的数据，不是只停留在"做了可观测性"这句话上。
 
 只做进程内够用的粒度：span 之间靠 `parent_span_id` 挂父子关系，暂时没有
 跨进程/跨服务的分布式 trace context 传播（MCP transport 那一层目前没有
-自己的 span id 可以往下传），这个边界在 VNEXT_STATUS 里写清楚。
+自己的 span id 可以往下传），这个边界在 `docs/ENGINEERING_NOTES.md` 里写清楚。
 """
 
 from __future__ import annotations
