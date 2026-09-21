@@ -22,7 +22,7 @@ from app.mcp_gateway.idempotency import IdempotencyStore
 from app.mcp_gateway.registry import ServerRegistry
 from app.mcp_gateway.server_specs import default_server_specs
 from app.security.rate_limit import RateLimiter
-from app.security.redaction import configure_logging, get_logger
+from app.security.redaction import configure_logging, get_logger, log_requests_middleware
 from app.sessions.manager import SessionManager
 from app.trace.tracer import Tracer
 
@@ -51,7 +51,10 @@ async def lifespan(app: FastAPI):
     app.state.health_monitor = health_monitor
 
     app.state.session_manager = SessionManager()
-    app.state.rate_limiter = RateLimiter()
+    app.state.rate_limiter = RateLimiter(
+        capacity=settings.rate_limit_capacity,
+        refill_per_second=settings.rate_limit_refill_per_minute / 60,
+    )
     app.state.tracer = Tracer(db_path=settings.trace_db_path)
 
     async with sqlite_checkpointer(settings.checkpoint_db_path) as checkpointer:
@@ -79,6 +82,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.middleware("http")(log_requests_middleware)
 
     app.include_router(routes_auth.router)
     app.include_router(routes_chat.router)

@@ -4,9 +4,9 @@
 
 最后更新：2026-09-20
 
-**总览**：下表 21 行里，19 行"已实现"（代码 + 真实测试/手工验证都有），2 行"进行中"（代码写了，但有具体没验证到的点——都写清楚了差在哪），0 行"未开始"。2 行"进行中"分别是：Weather Server 的 `query_weather`（缺 OPENWEATHER_API_KEY）、限流/日志脱敏的专项测试（代码在，没写"触发 429"和"脱敏接入实际请求日志"的测试）。下面"下一步"列出了这些和其它值得继续做的事。
+**总览**：下表 21 行全部"已实现"（代码 + 真实测试/手工验证都有）。原来剩的两项"进行中"（`query_weather` 的重试/缓存、限流+日志脱敏的专项测试）用户直接问了"为什么不去做"——确认之后发现两项都不需要真实 Key（respx mock HTTP 响应即可、限流和日志脱敏本来就不依赖外部服务），只是之前没有回头补，这一轮补上了。仍然值得继续做的事在下面"下一步"里。
 
-**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（42 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
+**环境**：本机系统 Python 只有 3.9，另外用 `~/miniconda3` 建了一个独立的 `mcp-agent-vnext` conda 环境（Python 3.11.16），`backend/requirements.txt` 已在其中装好，`pytest`（55 个用例）已在这个环境里跑绿；下面标"已实现"的都是在这个环境里真正跑通的结果，不是代码走查。激活方式：`source ~/miniconda3/bin/activate mcp-agent-vnext`。本机原本也没有 Node.js，用 Homebrew 装了 `node@26`；也没装 Docker，装好 Docker Desktop 后引擎一度起不来（Rosetta 安装失败），排查和修复过程见下面"真问题"部分，现在 `docker compose up` 已经真实跑通。
 
 | 模块 | 对应档案位置 | 状态 | 代码位置 | 测试/验证 |
 | --- | --- | --- | --- | --- |
@@ -15,7 +15,7 @@
 | 超时 / 重试 / 熔断器 | §11 | 已实现 | `backend/app/mcp_gateway/client.py`, `circuit_breaker.py` | `backend/tests/test_circuit_breaker.py`（4 用例）pytest 跑绿；重试/超时的真实故障场景（比如真的把某个 server 打挂）还没做专门的故障注入测试 |
 | 健康检查 / 单 Server 故障隔离 | §11, §10.2 | 已实现 | `backend/app/mcp_gateway/health.py`, `/readyz` | 真实起服务验证过：`map` server 没起来时，`/readyz` 里只有 `map` 被标 `unhealthy`，`weather`/`write` 仍然 `healthy` 且可以正常调用——单 server 故障没有把整个工具列表清空，这正是要修的那个具体缺陷 |
 | 幂等键（写类工具去重） | §11, §12.8 | 已实现 | `backend/app/mcp_gateway/idempotency.py` | `backend/tests/test_idempotency.py`（3 用例）pytest 跑绿；过程中发现并修复了一个真 bug（aiosqlite 连接被 await 两次导致 "threads can only be started once"）；另外用真实 GatewayClient 调用 `write.write_file` 两次同一个 idempotency_key，确认第二次是 `idempotent_replay: true`、没有真的重写文件 |
-| Weather Server 重写（重试/缓存/结构化错误） | §7, §10.4 | 进行中 | `mcp_servers/weather_server.py` | 真实子进程启动、`get_weather_tips` 端到端调通；`query_weather` 因为没有 OPENWEATHER_API_KEY，只验证了"未配置 key 时返回结构化 provider 错误"这条路径，重试/缓存逻辑本身未触发验证 |
+| Weather Server 重写（重试/缓存/结构化错误） | §7, §10.4 | 已实现 | `mcp_servers/weather_server.py` | 真实子进程启动、`get_weather_tips` 端到端调通；`query_weather` 的重试/缓存/结构化错误不需要真实 OPENWEATHER_API_KEY——用 `respx` mock OpenWeather 的 HTTP 响应，`mcp_servers/tests/test_weather_server.py`（7 用例）pytest 跑绿：未配置 key 直接短路、成功结果按城市缓存（第二次不再真的发 HTTP）、5xx/超时重试后成功、持续 5xx 用满 `MAX_ATTEMPTS` 次后报结构化 provider 错误、4xx 不重试直接报 validation 错误 |
 | Write Server 重写（路径沙箱、并发防覆盖、幂等） | §7, §12.8 | 已实现 | `mcp_servers/write_server.py` | `mcp_servers/tests/test_write_server.py`（6 用例）pytest 跑绿；额外用真实 GatewayClient 端到端验证了"未确认拒绝写入→确认后写入→重复调用走幂等回放" |
 | 地图 MCP Server（免 Key，替换占位符） | §7, §12.3 | 已实现 | `mcp_servers/map_server.py` | Docker 里真实用 `streamable-http` transport 起来了，`/readyz` 显示 `map` 健康、`map.geocode`/`map.reverse_geocode` 可用；直接调用 `geocode({"query": "Eiffel Tower"})` 拿到真实 Nominatim 结果（`48.8582599, 2.2945006`）——这是本项目第一次真正验证这个 Server，之前一直因为没跑过而标"未开始" |
 | 自定义 LangGraph 图（agent/tools/confirm/finalize 节点与条件边） | §9 偏差 1, §11 | 已实现 | `backend/app/agent/graph.py`, `nodes.py`, `state.py` | `backend/tests/test_agent_graph.py`（2 用例）pytest 跑绿，用脚本化的 `FakeMessagesListChatModel` + 真实 weather/write 子进程做端到端验证：单 tool_call 走 HITL 暂停→批准→真的写文件；多 tool_call 批次里前面无副作用的先执行、遇到有副作用的暂停、拒绝后确实没有写文件 |
@@ -25,7 +25,7 @@
 | SessionManager（user→conversation→thread，同 thread 并发锁） | §10.1, §11 | 已实现 | `backend/app/sessions/manager.py` | `backend/tests/test_session_manager.py`（5 用例）pytest 跑绿：跨用户越权访问被拒绝、只能看到自己的 conversation 列表、同一 thread 的并发请求被 `asyncio.Lock` 严格串行化（用真实 `asyncio.gather` 竞争验证顺序，不是靠猜时序） |
 | FastAPI SSE `/chat`、分级错误事件 | §11 | 已实现 | `backend/app/api/routes_chat.py`, `sse.py` | `backend/tests/test_app_integration.py`（5 用例）pytest 跑绿 + 真实 `uvicorn` 起服务用 `curl` 手工过了一遍完整链路：注册→登录→建会话→"帮我写一个笔记"→SSE 收到 `tool_call`/`confirm_required`/`final`→提交 `confirm:true`→SSE 收到 `tool_result`/`message`，`backend/output/` 下真的多了一个内容正确的 `.txt` 文件；`error` 事件这条路径也用真实通义千问 API 报错（见下方"真问题"）验证过，不是只在 mock 模式下测的 |
 | `/healthz` `/readyz` | §11 | 已实现 | `backend/app/api/routes_admin.py` | 同上，真实 curl 验证过两个端点，`/readyz` 能看到 per-server 健康状态和熔断器状态 |
-| CORS 白名单 / 限流 / 日志脱敏 | §10.3 | 进行中 | `backend/app/security/rate_limit.py`, `redaction.py`, `main.py` 里的 CORSMiddleware | CORS 配置代码完成，走集成测试间接覆盖（没有专门测跨域请求本身）；限流已经作为真实依赖挂在 `/chat` 上，但**没有写"连续请求触发 429"的测试**，`TokenBucket` 本身的算法逻辑也没有单独单测，只是代码走查；日志脱敏单独用脚本验证过 `dashscope_api_key` 这类字段会被替换成 `***redacted***`，但还没接到 `main.py` 实际的请求日志里 |
+| CORS 白名单 / 限流 / 日志脱敏 | §10.3 | 已实现 | `backend/app/security/rate_limit.py`, `redaction.py`, `main.py` 里的 CORSMiddleware + `log_requests_middleware` | CORS 配置代码完成，走集成测试间接覆盖（没有专门测跨域请求本身，这一点仍然是真的）。限流：`backend/tests/test_rate_limit.py`（5 用例）pytest 跑绿——`TokenBucket` 算法单测（消耗到空、按时间回充）+ 真实通过 `/chat` 连续请求触发 429、且验证了限流是按用户独立计的（用户 A 的额度用光不影响用户 B）。日志脱敏：新增 `log_requests_middleware` 真的接进了每个请求的处理链路（不再只是独立脚本演示），`backend/tests/test_request_logging_redaction.py` 验证了真实 JWT 不会原样出现在日志里；另外真起了一次服务器、用 curl 打过去，肉眼确认了日志里 `"authorization": "***redacted***"` |
 | Trace（结构化 span） | §11 | 已实现 | `backend/app/trace/tracer.py`, `GET /conversations/{id}/trace` | `backend/tests/test_app_integration.py` 里两个新用例 pytest 跑绿：真实走一轮天气对话后，trace 里能查到 `agent.invoke`/`tool.call:weather.get_weather_tips` 两个 span，状态和耗时都对；跨用户访问别人会话的 trace 会被拒绝（404）。范围边界：span 只到"网关发起工具调用"这一层，MCP transport 内部（比如 stdio 子进程里具体卡在哪一步）没有单独的 span；也没有做跨进程的分布式 trace context 传播——这些在 tracer.py 的注释里写清楚了，不算已实现 |
 | Eval 回归场景（mock 模式可跑） | §12 | 已实现 | `backend/eval/cases.py`, `runner.py`，`backend/tests/test_eval_cases.py` | 5 个脚本化场景（天气成功、写文件确认后执行、写文件拒绝后不执行、无关消息不触发工具、单 server 故障不影响其它工具）全部通过 `MockAgentModel` + 真实 MCP 子进程跑通，每个用例独立临时目录、互不干扰；接进了 pytest（`test_eval_cases.py`，5 用例跑绿），也能用 `python -m eval.runner` 单独跑出一份文本报告。额外做了一次"harness 自检"：故意写一个错误断言，确认 runner 真的会报 FAIL 而不是摆设 |
 | Vue3 前端（真实 thread_id、SSE 消费、语法高亮、分级错误+重试、HITL 确认卡） | §9 偏差 5-6, §11 | 已实现 | `frontend/src/` | 用内置浏览器手工走了一遍完整流程：注册→建会话→问天气（看到 tool_call/tool_result、不需要确认）→要求写笔记（看到确认卡→批准→看到执行成功，磁盘上真的多了文件）→再写一次→拒绝（看到"用户拒绝执行该操作"，磁盘上没有多文件）→同一会话里多轮历史正确保留。`thread_id` 全程前端拿不到，只有 `conversation_id`。类型检查（`vue-tsc -b`）和生产构建（`vite build`）都过 |
@@ -44,8 +44,8 @@
 
 1. ~~补真实 Key，跑一次真实联调~~ **已完成**：拿到 `DASHSCOPE_API_KEY` 后真实跑通了纯聊天、天气工具调用、写文件+HITL 全流程；模型名要用经典的 `qwen-plus`，账号百炼目录里那些新版本号命名（`qwen3.8-flash` 之类）会报 `InvalidParameter: url error`，`ChatTongyi`/经典 DashScope 接口不认。`OPENWEATHER_API_KEY` 还没补。
 2. ~~流式索引错误~~ **已完成（范围内）**：`streaming=True` 在上面几个场景里没有复现档案说的那个崩溃。还没做的：长对话、高并发、多个工具连续调用这些更复杂的场景没有专门压测过，真要写成回归测试还需要先弄清楚原来的崩溃具体触发条件是什么（档案本身也没留错误栈）。
-3. **限流与日志脱敏的专项测试**：`backend/tests/test_rate_limit.py`（连续请求触发 429、令牌桶恢复速率）+ 把 `redaction.py` 的处理器接到 `main.py` 实际的请求日志管线里并验证。
-4. **补 `OPENWEATHER_API_KEY`，验证 `query_weather` 的重试/缓存逻辑**：现在这两块代码写了但从没真正触发过。
+3. ~~限流与日志脱敏的专项测试~~ **已完成**：`test_rate_limit.py`（`TokenBucket` 算法单测 + 真实触发 429 + 按用户隔离）、`log_requests_middleware` 接进真实请求日志并用 `test_request_logging_redaction.py` + 真实起服务器验证过。
+4. **用真实 `OPENWEATHER_API_KEY` 跑一次 `query_weather`**：重试/缓存/结构化错误的逻辑已经用 `respx` mock 验证过，但还没有对接过真实的 OpenWeather API 本身返回的数据格式——mock 的响应结构是照着 OpenWeather 文档编的，没有拿真实响应交叉验证过，优先级比之前低但不等于零。
 5. **前端会话历史回放**：加一个 `GET /conversations/{id}/messages`（从 LangGraph checkpoint 读历史），切换/重新打开会话时前端拉一次渲染，补上 VNEXT_STATUS 里记的那个已知缺口。
 6. **故障注入测试**：真的把一个 MCP server 进程杀掉/让它超时，验证熔断器状态转移和重试退避在真实故障下的行为，而不是只靠单元测试里模拟的失败结果。
 7. **多 worker 部署**：如果真要多进程部署，`SessionManager` 的 `asyncio.Lock` 需要换成数据库行锁或 Redis 分布式锁——现在明确标了这个边界，不是文档遗漏。

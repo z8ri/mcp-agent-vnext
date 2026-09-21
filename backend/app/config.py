@@ -39,6 +39,9 @@ class Settings(BaseSettings):
 
     cors_allowed_origins: str = "http://localhost:5173"
 
+    rate_limit_capacity: int = 10
+    rate_limit_refill_per_minute: float = 10.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_allowed_origins.split(",") if o.strip()]
