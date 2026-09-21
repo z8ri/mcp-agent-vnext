@@ -2,11 +2,11 @@
 
 ![python](https://img.shields.io/badge/python-3.11-3776AB) ![vue](https://img.shields.io/badge/frontend-vue3-42b883) ![langgraph](https://img.shields.io/badge/orchestration-langgraph-1C3C3C) [![CI](https://github.com/z8ri/mcp-multi-tool-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/z8ri/mcp-multi-tool-agent/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-3DA639)](LICENSE)
 
-多数教学/demo 级别的 Agent 项目要么把控制流整个交给框架自带的 `create_react_agent`，工具调用失败、并发写检查点冲突、副作用操作要不要人工确认这些工程问题基本不处理；要么反过来堆一堆没有真实验证过的功能点，"看起来"完整。这个项目走的是另一条路：一个从零手写的 LangGraph 状态图（`agent` / `tools` / `confirm` / `finalize` 四个节点 + 条件边），前面接一个带熔断器、健康检查、幂等键、超时重试的 MCP Tool Gateway，支持多用户会话隔离、可从进程重启中恢复的对话状态，以及写文件这类有副作用操作的真实人工确认——HITL 在这里不是设计图上的一个词，图会真的暂停执行，等一次 API 调用把它批准或者拒绝。72 个自动化测试、`backend/app` 94% 行覆盖率，CI 在每次 push 上真的跑；这条链路也用真实 Qwen API 完整跑通过一次，细节记在 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)。
+一个从零手写的 LangGraph 状态图（`agent` / `tools` / `confirm` / `finalize` 四个节点 + 条件边），前面接一个带熔断器、健康检查、幂等键、超时重试的 MCP Tool Gateway，支持多用户会话隔离、可从进程重启中恢复的对话状态，以及写文件这类有副作用操作的真实人工确认——HITL 在这里不是设计图上的一个词，图会真的暂停执行，等一次 API 调用把它批准或者拒绝。72 个自动化测试、`backend/app` 94% 行覆盖率，CI 在每次 push 上真的跑；这条链路也用真实 Qwen API 完整跑通过一次，细节记在 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)。
 
 ## 为什么这么设计
 
-多工具 Agent 接进生产环境之前，绕不开这几个问题；demo 级别的实现通常直接跳过：
+多工具 Agent 接进生产环境之前，有几个问题绕不开：
 
 1. **写类工具调用怎么做到真的需要人批准，而不是 UI 上一个不拦截任何东西的确认框？** `confirm` 节点用 LangGraph 的 `interrupt()` 真的暂停图的执行——客户端提交 `confirm: true/false` 之前，写文件工具根本不会被调用；暂停状态落在 SQLite Checkpointer 里，进程重启也不会丢。
 2. **一个 MCP Server 挂了，怎么不把其它工具也一起拖死？** 每个 Server 有独立的熔断器和健康检查，`/readyz` 按 Server 分别汇报状态。`map` 挂了的时候 `weather`/`write` 仍然正常可用——集成测试和真实 Docker 部署里都验证过。
