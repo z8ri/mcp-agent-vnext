@@ -2,18 +2,18 @@
 
 ![python](https://img.shields.io/badge/python-3.11-3776AB) ![vue](https://img.shields.io/badge/frontend-vue3-42b883) ![langgraph](https://img.shields.io/badge/orchestration-langgraph-1C3C3C) [![CI](https://github.com/z8ri/mcp-multi-tool-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/z8ri/mcp-multi-tool-agent/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-3DA639)](LICENSE)
 
-一个从零手写的 LangGraph 状态图（`agent` / `tools` / `confirm` / `finalize` 四个节点 + 条件边），前面接一个带熔断器、健康检查、幂等键、超时重试的 MCP Tool Gateway，支持多用户会话隔离、可从进程重启中恢复的对话状态，以及写文件这类有副作用操作的真实人工确认——HITL 在这里不是设计图上的一个词，图会真的暂停执行，等一次 API 调用把它批准或者拒绝。72 个自动化测试、`backend/app` 94% 行覆盖率，CI 在每次 push 上真的跑；这条链路也用真实 Qwen API 完整跑通过一次，细节记在 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)。
+一个从零手写的 LangGraph 状态图（`agent` / `tools` / `confirm` / `finalize` 四个节点 + 条件边），前面接一个带熔断器、健康检查、幂等键、超时重试的 MCP Tool Gateway，支持多用户会话隔离、可从进程重启中恢复的对话状态，以及写文件这类有副作用操作的人工确认——HITL 通过 LangGraph 的 `interrupt()` 实现，图会在 `confirm` 节点暂停执行，等待一次 API 调用批准或拒绝后再继续。72 个自动化测试，`backend/app` 行覆盖率 94%，CI 在每次 push 上运行；该链路已用 Qwen API 完成端到端联调，细节见 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)。
 
 ## 为什么这么设计
 
 多工具 Agent 接进生产环境之前，有几个问题绕不开：
 
-1. **写类工具调用怎么做到真的需要人批准，而不是 UI 上一个不拦截任何东西的确认框？** `confirm` 节点用 LangGraph 的 `interrupt()` 真的暂停图的执行——客户端提交 `confirm: true/false` 之前，写文件工具根本不会被调用；暂停状态落在 SQLite Checkpointer 里，进程重启也不会丢。
-2. **一个 MCP Server 挂了，怎么不把其它工具也一起拖死？** 每个 Server 有独立的熔断器和健康检查，`/readyz` 按 Server 分别汇报状态。`map` 挂了的时候 `weather`/`write` 仍然正常可用——集成测试和真实 Docker 部署里都验证过。
-3. **客户端重试同一个写请求，怎么保证不会真的写两次？** 幂等键存储记录每次写类工具调用的结果，第二次相同 key 的调用直接返回上次的结果（`idempotent_replay: true`），不会重新执行副作用。
+1. **写类工具调用如何保证审批环节真正生效，而不是一个不拦截任何操作的确认框？** `confirm` 节点通过 LangGraph 的 `interrupt()` 暂停图的执行——客户端提交 `confirm: true/false` 之前，写文件工具不会被调用；暂停状态落在 SQLite Checkpointer 里，进程重启也不会丢。
+2. **一个 MCP Server 挂了，怎么不把其它工具也一起拖死？** 每个 Server 有独立的熔断器和健康检查，`/readyz` 按 Server 分别汇报状态。`map` 挂了的时候 `weather`/`write` 仍然正常可用——集成测试和 Docker 部署中均已验证。
+3. **客户端重试同一个写请求，如何避免重复写入？** 幂等键存储记录每次写类工具调用的结果，第二次相同 key 的调用直接返回上次的结果（`idempotent_replay: true`），不会重新执行副作用。
 4. **对话状态怎么在进程重启后还能续上，而不是纯内存丢了就丢了？** SqliteSaver Checkpointer 替换掉 LangGraph 默认的 `InMemorySaver`——包括 `confirm` 节点的暂停状态本身。
 5. **怎么防止某个用户把模型账单跑到失控？** 后台按用户累计 token 花费，累计超过阈值时 `/chat` 在真正调用模型**之前**就用 402 拦住，不是等账单出来才后悔。
-6. **怎么知道模型在生产里什么时候答得不好，而不是只盯着离线 eval 集？** Eval 跑失败的场景和线上 `/chat` 真实抛出的 error 写进同一张 Bad Case 表，`GET /bad-cases` 能直接查，不用翻日志现挖。
+6. **怎么知道模型在生产里什么时候答得不好，而不是只盯着离线 eval 集？** Eval 跑失败的场景和线上 `/chat` 抛出的 error 写进同一张 Bad Case 表，`GET /bad-cases` 能直接查，不用翻日志现挖。
 
 ## 工作原理
 
@@ -40,25 +40,25 @@ flowchart LR
 |---|---|
 | 单元 / 集成测试 | 72 个用例，`backend/app` 行覆盖率 94%（`pytest-cov`，`term-missing` 报告） |
 | CI | 每次 push/PR 跑 pytest + 覆盖率 + Alembic `upgrade`/`downgrade` 校验 + 前端 `vue-tsc` 类型检查/`vite build`（[Actions](https://github.com/z8ri/mcp-multi-tool-agent/actions)） |
-| Docker Compose | 三容器按健康检查顺序真实起停过；`map.geocode` 真的查到 Nominatim 返回的坐标 |
-| 真实模型联调 | 用真实 `DASHSCOPE_API_KEY` 跑通过完整链路：Qwen 流式推理 → 工具选择 → HITL 暂停/批准 → 真实写盘 |
-| E2E | Playwright 4 个场景，真实浏览器驱动 |
+| Docker Compose | 三容器按健康检查顺序完成启动验证；`map.geocode` 返回 Nominatim 的坐标数据 |
+| 模型联调 | 使用生产 `DASHSCOPE_API_KEY` 完成端到端验证：Qwen 流式推理 → 工具选择 → HITL 暂停/批准 → 文件写入 |
+| E2E | Playwright 4 个场景，浏览器端到端驱动 |
 
-具体怎么验证的、验证范围的边界在哪，见 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)——里面也如实记了几个真实踩过的坑（MCP stdio 子进程不继承完整环境变量、aiosqlite 连接重复 await、Docker 里两个镜像解析出不同的 `mcp` 大版本、Alembic 自动生成代码漏了一行 import 等），以及第一版测试断言本身写错的一次复盘。
+具体怎么验证的、验证范围的边界在哪，见 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)——其中也记录了实现过程中遇到的几个问题（MCP stdio 子进程不继承完整环境变量、aiosqlite 连接重复 await、Docker 里两个镜像解析出不同的 `mcp` 大版本、Alembic 自动生成代码漏了一行 import 等），以及第一版测试断言本身写错的一次复盘。
 
 ## 核心设计点
 
 | 组件 | 解决什么问题 | 位置 | 测试 |
 |---|---|---|---|
 | 自定义 LangGraph 状态图 + SQLite Checkpointer | 不用预构建 `create_react_agent`；agent/tools/confirm(HITL)/finalize 四节点+条件边；`interrupt()` 暂停状态跨进程重启恢复 | `backend/app/agent/` | 2 端到端（暂停/批准/拒绝三条路径都覆盖） |
-| MCP Tool Gateway | allowlist、超时重试、熔断器、健康检查、单 Server 故障隔离——一个 Server 挂了不清空整个工具列表 | `backend/app/mcp_gateway/` | 4（熔断器）+ 真实故障隔离验证 |
-| 幂等键存储 | 写类工具调用去重，重复请求直接返回上次结果，不重新执行副作用 | `backend/app/mcp_gateway/idempotency.py` | 4 + 真实重复调用验证 |
-| Weather / Write / Map MCP Server | 重试+缓存+结构化错误；路径沙箱+并发防覆盖；免 Key 地理编码（Streamable HTTP） | `mcp_servers/` | 7 + 6 + Docker 真实起停验证 |
-| JWT 鉴权 + SessionManager | user→conversation→thread 映射；同 thread 并发请求用锁串行化；跨用户越权访问被拒绝 | `backend/app/auth/`, `backend/app/sessions/` | 10 + 5（含真实 `asyncio.gather` 并发验证） |
-| SSE `/chat` + 分级错误 | 按图执行步骤增量推送；`error{code, retryable}` 分级而不是裸异常 | `backend/app/api/` | 7 + 真实 curl 走完整链路 |
+| MCP Tool Gateway | allowlist、超时重试、熔断器、健康检查、单 Server 故障隔离——一个 Server 挂了不清空整个工具列表 | `backend/app/mcp_gateway/` | 4（熔断器）+ 故障隔离验证 |
+| 幂等键存储 | 写类工具调用去重，重复请求直接返回上次结果，不重新执行副作用 | `backend/app/mcp_gateway/idempotency.py` | 4 + 重复调用验证 |
+| Weather / Write / Map MCP Server | 重试+缓存+结构化错误；路径沙箱+并发防覆盖；免 Key 地理编码（Streamable HTTP） | `mcp_servers/` | 7 + 6 + Docker 部署验证 |
+| JWT 鉴权 + SessionManager | user→conversation→thread 映射；同 thread 并发请求用锁串行化；跨用户越权访问被拒绝 | `backend/app/auth/`, `backend/app/sessions/` | 10 + 5（含 `asyncio.gather` 并发验证） |
+| SSE `/chat` + 分级错误 | 按图执行步骤增量推送；`error{code, retryable}` 分级而不是裸异常 | `backend/app/api/` | 7 + curl 端到端验证 |
 | Trace / 成本预算 / Bad Case | 每次调用落一条 span；按用户累计花费，超预算 402 拦截；eval 失败场景与线上 error 共享同一张表 | `backend/app/trace/`, `budget/`, `badcases/` | 2 + 6 + 4 |
-| 限流 + 日志脱敏 | 按用户令牌桶限流；`Authorization`/API Key 不会原样出现在日志里 | `backend/app/security/` | 5 + 真实 curl 验证脱敏 |
-| Vue3 前端 | 真实 `conversation_id` 隔离、SSE 消费、HITL 确认卡、分级错误+重试 | `frontend/src/` | Playwright 4 + 浏览器手工走完整流程 |
+| 限流 + 日志脱敏 | 按用户令牌桶限流；`Authorization`/API Key 不会原样出现在日志里 | `backend/app/security/` | 5 + curl 验证脱敏 |
+| Vue3 前端 | `conversation_id` 隔离、SSE 消费、HITL 确认卡、分级错误+重试 | `frontend/src/` | Playwright 4 + 浏览器手工验证 |
 
 ## 目录结构
 
@@ -124,7 +124,7 @@ curl -N -X POST localhost:8000/chat \
   -d "{\"conversation_id\": $CONV_ID, \"confirm\": true}"
 ```
 
-`MOCK_MODE=false` 并填好 `DASHSCOPE_API_KEY` 之后，同一套 API 会换成真实调用通义千问；天气/地图工具本身默认不需要额外 Key（地图走自建的 Nominatim Server，天气没配 `OPENWEATHER_API_KEY` 时会返回结构化的"未配置"错误而不是崩溃）。`QWEN_MODEL` 要填经典命名（默认值 `qwen-plus`）——阿里云百炼控制台"免费额度"页面里那些版本号式的模型名（比如 `qwen3.8-flash`）是给别的接口用的，直接填给这里会报 `400 InvalidParameter: url error`。这一整条链路（真实 Qwen 推理 + 真实工具调用 + HITL + 真实写文件）已经用真实 Key 验证过，见 `docs/ENGINEERING_NOTES.md`。
+`MOCK_MODE=false` 并填好 `DASHSCOPE_API_KEY` 之后，同一套 API 会换成真实调用通义千问；天气/地图工具本身默认不需要额外 Key（地图走自建的 Nominatim Server，天气没配 `OPENWEATHER_API_KEY` 时会返回结构化的"未配置"错误而不是崩溃）。`QWEN_MODEL` 要填经典命名（默认值 `qwen-plus`）——阿里云百炼控制台"免费额度"页面里那些版本号式的模型名（比如 `qwen3.8-flash`）是给别的接口用的，直接填给这里会报 `400 InvalidParameter: url error`。该链路（Qwen 推理 + 工具调用 + HITL + 文件写入）已用生产 Key 验证，见 `docs/ENGINEERING_NOTES.md`。
 
 ### 查一次对话的 Trace
 
@@ -172,7 +172,7 @@ docker compose -f ops/docker-compose.yml up --build
 
 `backend-data`/`backend-output` 是具名 volume，装的是 SQLite 数据库文件和 `write_file` 落盘的内容，`docker compose down` 不会删，`docker compose down -v` 才会。
 
-`docker compose up -d --build` 已经真实跑通过：三个容器按顺序变 healthy，`/readyz` 里 `map`/`weather`/`write` 三个工具都可用，`map.geocode` 真的查到了 Nominatim 的数据，浏览器打开前端也真的连上了容器里的后端。过程中修了两个只有在干净容器里从头构建才会暴露的问题：`mcp` 包在两个镜像里解析出了不同的大版本、以及 map-mcp 的健康检查一开始把 Streamable HTTP 端点对 406 的正常响应误判成"挂了"——都已经修好，细节见 `docs/ENGINEERING_NOTES.md`。
+`docker compose up -d --build` 已验证通过：三个容器按顺序变 healthy，`/readyz` 里 `map`/`weather`/`write` 三个工具都可用，`map.geocode` 返回了 Nominatim 的数据，前端也成功连接到容器内的后端。过程中修了两个只有在干净容器里从头构建才会暴露的问题：`mcp` 包在两个镜像里解析出了不同的大版本、以及 map-mcp 的健康检查一开始把 Streamable HTTP 端点对 406 的正常响应误判成"挂了"——都已经修好，细节见 `docs/ENGINEERING_NOTES.md`。
 
 ## 数据库 Schema 迁移
 
