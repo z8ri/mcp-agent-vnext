@@ -4,17 +4,6 @@
 
 一个从零手写的 LangGraph 状态图（`agent` / `tools` / `confirm` / `finalize` 四个节点 + 条件边），前面接一个带熔断器、健康检查、幂等键、超时重试的 MCP Tool Gateway，支持多用户会话隔离、可从进程重启中恢复的对话状态，以及写文件这类有副作用操作的人工确认——HITL 通过 LangGraph 的 `interrupt()` 实现，图会在 `confirm` 节点暂停执行，等待一次 API 调用批准或拒绝后再继续。72 个自动化测试，`backend/app` 行覆盖率 94%，CI 在每次 push 上运行；该链路已用 Qwen API 完成端到端联调，细节见 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)。
 
-## 为什么这么设计
-
-多工具 Agent 接进生产环境之前，有几个问题绕不开：
-
-1. **写类工具调用如何保证审批环节真正生效，而不是一个不拦截任何操作的确认框？** `confirm` 节点通过 LangGraph 的 `interrupt()` 暂停图的执行——客户端提交 `confirm: true/false` 之前，写文件工具不会被调用；暂停状态落在 SQLite Checkpointer 里，进程重启也不会丢。
-2. **一个 MCP Server 挂了，怎么不把其它工具也一起拖死？** 每个 Server 有独立的熔断器和健康检查，`/readyz` 按 Server 分别汇报状态。`map` 挂了的时候 `weather`/`write` 仍然正常可用——集成测试和 Docker 部署中均已验证。
-3. **客户端重试同一个写请求，如何避免重复写入？** 幂等键存储记录每次写类工具调用的结果，第二次相同 key 的调用直接返回上次的结果（`idempotent_replay: true`），不会重新执行副作用。
-4. **对话状态怎么在进程重启后还能续上，而不是纯内存丢了就丢了？** SqliteSaver Checkpointer 替换掉 LangGraph 默认的 `InMemorySaver`——包括 `confirm` 节点的暂停状态本身。
-5. **怎么防止某个用户把模型账单跑到失控？** 后台按用户累计 token 花费，累计超过阈值时 `/chat` 在真正调用模型**之前**就用 402 拦住，不是等账单出来才后悔。
-6. **怎么知道模型在生产里什么时候答得不好，而不是只盯着离线 eval 集？** Eval 跑失败的场景和线上 `/chat` 抛出的 error 写进同一张 Bad Case 表，`GET /bad-cases` 能直接查，不用翻日志现挖。
-
 ## 工作原理
 
 ```mermaid
@@ -34,31 +23,44 @@ flowchart LR
 
 `thread_id` 全程只存在于服务端（`SessionManager` 维护 `conversation_id → thread_id` 的映射），前端只知道 `conversation_id`，拿不到也改不了 LangGraph 的 thread 标识。写文件这类有副作用的工具调用会让图在 `confirm` 节点真正 `interrupt()`，客户端提交 `confirm: true/false` 之后才 `resume`——中间如果进程重启，SQLite Checkpointer 能把暂停状态原样恢复。
 
-## 验证
+## 关键设计决策
 
-| | |
-|---|---|
-| 单元 / 集成测试 | 72 个用例，`backend/app` 行覆盖率 94%（`pytest-cov`，`term-missing` 报告） |
-| CI | 每次 push/PR 跑 pytest + 覆盖率 + Alembic `upgrade`/`downgrade` 校验 + 前端 `vue-tsc` 类型检查/`vite build`（[Actions](https://github.com/z8ri/mcp-multi-tool-agent/actions)） |
-| Docker Compose | 三容器按健康检查顺序完成启动验证；`map.geocode` 返回 Nominatim 的坐标数据 |
-| 模型联调 | 使用生产 `DASHSCOPE_API_KEY` 完成端到端验证：Qwen 流式推理 → 工具选择 → HITL 暂停/批准 → 文件写入 |
-| E2E | Playwright 4 个场景，浏览器端到端驱动 |
+按 ADR 的方式记录几个不是唯一解、但各自有明确取舍的决定；完整列表和验证过程见 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)。
 
-具体怎么验证的、验证范围的边界在哪，见 [docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)——其中也记录了实现过程中遇到的几个问题（MCP stdio 子进程不继承完整环境变量、aiosqlite 连接重复 await、Docker 里两个镜像解析出不同的 `mcp` 大版本、Alembic 自动生成代码漏了一行 import 等），以及第一版测试断言本身写错的一次复盘。
+**HITL 用 LangGraph 的 `interrupt()` 实现，而不是一个应用层的"待确认"状态字段。**
+图在 `confirm` 节点真正暂停，写文件工具在客户端提交 `confirm: true` 之前不会被调用；暂停状态随 SQLite Checkpointer 持久化，进程重启不丢。代价：写类工具的调用路径比纯 ReAct 循环多一次显式的图状态转移，暂停/批准/拒绝三条路径都需要单独覆盖。
 
-## 核心设计点
+**每个 MCP Server 独立熔断，Gateway 不作为单一故障域。**
+一个 Server 的健康状态只影响它自己的工具列表，`/readyz` 按 Server 分别汇报。代价：`/readyz` 的语义从"整体健康"变成"逐 Server 健康"，调用方要按这个语义读，不能简单取一个布尔值。
 
-| 组件 | 解决什么问题 | 位置 | 测试 |
-|---|---|---|---|
-| 自定义 LangGraph 状态图 + SQLite Checkpointer | 不用预构建 `create_react_agent`；agent/tools/confirm(HITL)/finalize 四节点+条件边；`interrupt()` 暂停状态跨进程重启恢复 | `backend/app/agent/` | 2 端到端（暂停/批准/拒绝三条路径都覆盖） |
-| MCP Tool Gateway | allowlist、超时重试、熔断器、健康检查、单 Server 故障隔离——一个 Server 挂了不清空整个工具列表 | `backend/app/mcp_gateway/` | 4（熔断器）+ 故障隔离验证 |
-| 幂等键存储 | 写类工具调用去重，重复请求直接返回上次结果，不重新执行副作用 | `backend/app/mcp_gateway/idempotency.py` | 4 + 重复调用验证 |
-| Weather / Write / Map MCP Server | 重试+缓存+结构化错误；路径沙箱+并发防覆盖；免 Key 地理编码（Streamable HTTP） | `mcp_servers/` | 7 + 6 + Docker 部署验证 |
-| JWT 鉴权 + SessionManager | user→conversation→thread 映射；同 thread 并发请求用锁串行化；跨用户越权访问被拒绝 | `backend/app/auth/`, `backend/app/sessions/` | 10 + 5（含 `asyncio.gather` 并发验证） |
-| SSE `/chat` + 分级错误 | 按图执行步骤增量推送；`error{code, retryable}` 分级而不是裸异常 | `backend/app/api/` | 7 + curl 端到端验证 |
-| Trace / 成本预算 / Bad Case | 每次调用落一条 span；按用户累计花费，超预算 402 拦截；eval 失败场景与线上 error 共享同一张表 | `backend/app/trace/`, `budget/`, `badcases/` | 2 + 6 + 4 |
-| 限流 + 日志脱敏 | 按用户令牌桶限流；`Authorization`/API Key 不会原样出现在日志里 | `backend/app/security/` | 5 + curl 验证脱敏 |
-| Vue3 前端 | `conversation_id` 隔离、SSE 消费、HITL 确认卡、分级错误+重试 | `frontend/src/` | Playwright 4 + 浏览器手工验证 |
+**幂等键由调用方提供并复用，Gateway 不代为生成。**
+调用方对同一操作复用同一个 key 时，第二次调用直接拿回第一次的结果，不重放副作用。代价：正确性依赖调用方遵守"同一意图用同一个 key"的约定，Gateway 本身判断不出两次调用是否代表同一件事。
+
+**成本预算在调用模型之前拦截，而不是记账后再报警。**
+累计花费超过阈值时，请求在真正触达模型之前就被 402 拒绝。代价：价格表是手工维护的近似值而非实时计费 API，`GET /budget` 里显式带了 `price_table_as_of` 字段，不隐藏这个事实。
+
+**SessionManager 的并发控制用进程内 `asyncio.Lock`，不引入分布式锁。**
+单 worker 部署下足够正确，也不用为此引入 Redis 依赖。代价：多 worker/多副本部署下每个进程有自己的锁，起不到跨进程互斥的作用——这是已知边界，见下方。
+
+## 模块
+
+- **Agent Harness**（`backend/app/agent/`）——自定义 LangGraph 状态图 + SQLite Checkpointer，2 个端到端用例覆盖暂停/批准/拒绝三条路径
+- **MCP Tool Gateway**（`backend/app/mcp_gateway/`）——allowlist、超时重试、熔断器、健康检查、幂等键，4 + 4 个用例，另有故障隔离验证
+- **MCP Server**（`mcp_servers/`）——weather（重试/缓存/结构化错误）、write（路径沙箱/并发防覆盖）、map（免 Key，Streamable HTTP），7 + 6 个用例，Docker 部署中验证过
+- **鉴权与会话**（`backend/app/auth/`, `backend/app/sessions/`）——JWT + SessionManager，10 + 5 个用例，含 `asyncio.gather` 并发场景验证
+- **API 层**（`backend/app/api/`）——SSE `/chat`、`error{code, retryable}` 分级错误、限流、日志脱敏，7 + 5 个用例
+- **可观测性**（`backend/app/trace/`, `budget/`, `badcases/`）——结构化 Trace、按用户成本预算、Bad Case 收集，2 + 6 + 4 个用例
+- **前端**（`frontend/src/`）——`conversation_id` 隔离、SSE 消费、HITL 确认卡、分级错误+重试，Playwright 4 个用例
+
+72 个用例、`backend/app` 行覆盖率 94%，CI 每次 push 运行（[Actions](https://github.com/z8ri/mcp-multi-tool-agent/actions)）；Docker Compose 和生产 Qwen API 均已完成端到端联调。
+
+## 已知边界
+
+如实列几条明确知道、但这一版没有解决的问题，而不是含糊带过：
+
+- **多 worker/多副本部署**：`SessionManager` 的并发锁是进程内的，跨进程无效，需要换成数据库行锁或分布式锁。
+- **前端会话历史回放**：切换到一个已有对话时，界面不会从后端重新拉取历史消息，只在当前页面会话内靠 SSE 事件累积；服务端状态本身没有丢。
+- **`/bad-cases` 与 `/budget` 的访问控制**：目前任何登录用户都能看，没有角色系统收窄成运维视角。
 
 ## 目录结构
 
